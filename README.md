@@ -2,8 +2,7 @@
 
 浏览器插件，AI 自动追踪小说伏笔、生成人物关系图、无剧透前情提要。长篇追更党必备。
 
-[![国内](https://img.shields.io/badge/🌏-国内可访问-C75B39)](https://novel-copilot-backend.haoyunh415.workers.dev)
-[![GitHub Pages](https://img.shields.io/badge/🌐-备用地址-5D4037)](https://haoyunh415-create.github.io/novel-copilot-backend/)
+[![国内可访问](https://img.shields.io/badge/🌏-国内可访问-C75B39)](https://novel-copilot-backend.pages.dev)
 
 ---
 
