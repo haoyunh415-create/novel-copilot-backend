@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:300px;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#3d322b;background:#fdfaf5}
+.top-bar{background:linear-gradient(135deg,#4a3228,#6d4c41);padding:14px 16px;color:#fff}
+.top-bar .logo{font-size:17px;font-weight:700;letter-spacing:1px}
+.top-bar .tagline{font-size:10px;opacity:.75;margin-top:2px}
+.main{padding:12px 14px}
+input,select{width:100%;padding:9px 10px;margin:5px 0;border:1px solid #ddd0c4;border-radius:6px;font-size:12px;background:#fff;transition:border .2s}
+input:focus,select:focus{outline:none;border-color:#8d6e63;box-shadow:0 0 0 2px rgba(141,110,99,.12)}
+.btn{width:100%;min-height:34px;margin:4px 0;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
+.btn:active{transform:scale(.98)}
+.btn-primary{background:#5d4037;color:#fff}
+.btn-primary:hover{background:#4a3228}
+.btn-secondary{background:#ede4db;color:#5d4037}
+.btn-secondary:hover{background:#e0d4c8}
+.btn-accent{background:#f5a623;color:#fff}
+.btn-accent:hover{background:#e09515}
+.info-card{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin:8px 0;background:#fff;border:1px solid #e8ddd2;border-radius:8px}
+.info-card .label{font-size:11px;color:#9b8b7c}
+.info-card .value{font-size:16px;font-weight:700;color:#5d4037}
+.divider{margin:10px 0;border-top:1px solid #ede4db}
+.settings{font-size:10px;color:#b0a395}
+.settings input{font-size:10px;padding:6px 8px}
+.settings .btn{min-height:26px;font-size:10px}
+#message{min-height:16px;margin-top:6px;font-size:11px;line-height:1.4}
+#message.success{color:#2e7d32}
+#message.error{color:#c62828}
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <div class="logo">鉴来助手</div>
+  <div class="tagline">长篇无剧透记忆助手 · 前情提要 · 伏笔雷达</div>
+</div>
+
+<div class="main">
+
+  <!-- 登录区 -->
+  <div id="auth-box">
+    <input id="username" autocomplete="username" placeholder="用户名">
+    <input id="password" type="password" autocomplete="current-password" placeholder="密码">
+    <button id="login" class="btn btn-primary">登录</button>
+    <button id="register" class="btn btn-secondary">注册 · 领 3 次免费体验</button>
+  </div>
+
+  <!-- 用户区 -->
+  <div id="user-box" style="display:none">
+    <div class="info-card">
+      <span class="label">剩余额度</span>
+      <span class="value"><span id="credits">0</span> 次</span>
+    </div>
+    <button id="start" class="btn btn-accent">✦ 分析当前章节</button>
+
+    <div style="margin:6px 0;">
+      <select id="plan-select">
+        <option value="basic">100 次 · ¥9.9</option>
+        <option value="pro">300 次 · ¥19.9</option>
+        <option value="monthly">月卡 · ¥19.9</option>
+        <option value="earlybird">早鸟 · ¥49</option>
+        <option value="lifetime">永久 · ¥99</option>
+      </select>
+      <button id="buy" class="btn btn-secondary">购买套餐</button>
+    </div>
+
+    <div class="divider"></div>
+    <button id="logout" class="btn btn-secondary">退出登录</button>
+  </div>
+
+  <div id="message"></div>
+
+  <!-- 服务器设置 -->
+  <div class="divider"></div>
+  <div class="settings">
+    <label>服务器地址</label>
+    <input id="api-url" placeholder="http://127.0.0.1:8000">
+    <button id="save-api" class="btn btn-secondary">保存</button>
+  </div>
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>

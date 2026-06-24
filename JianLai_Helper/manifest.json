@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "鉴来助手 - 小说 AI 伏笔雷达",
+  "description": "为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。",
+  "version": "2.1.0",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["http://127.0.0.1:8000/*", "http://*/*", "https://*/*"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["vis-network.min.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
