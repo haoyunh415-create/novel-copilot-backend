@@ -1,10 +1,14 @@
 import hashlib
 import json
 import os
+import random
 import re
+import smtplib
 import sqlite3
 import time
 from contextlib import contextmanager
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from typing import Optional
 
 import jwt
@@ -63,6 +67,70 @@ SECRET_KEY = os.getenv("SECRET_KEY", "dev_only_change_me")
 ACCESS_TOKEN_TTL_SECONDS = int(os.getenv("ACCESS_TOKEN_TTL_SECONDS", "86400"))
 MOCK_PAYMENTS_ENABLED = os.getenv("MOCK_PAYMENTS_ENABLED", "false").lower() == "true"
 
+# ── 邮件配置 ──
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.qq.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASS = os.getenv("SMTP_PASS", "")
+EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASS)
+
+# 验证码存储（内存）：{email: {code, expires}}
+_email_codes = {}
+
+# ── 请求限流 ──
+# {key: [timestamp, ...]}
+_rate_limits = {}
+RATE_LIMITS = {
+    "analyze": {"per_user": 20, "window": 60},       # 每用户每分钟最多20次分析
+    "ask": {"per_user": 10, "window": 60},            # 每用户每分钟最多10次问答
+    "send_code": {"per_ip": 3, "window": 300},         # 每IP每5分钟最多3次发验证码
+    "verify_code": {"per_ip": 10, "window": 300},      # 每IP每5分钟最多10次验证
+    "register": {"per_ip": 5, "window": 3600},          # 每IP每小时最多5次注册
+    "login": {"per_ip": 20, "window": 60},              # 每IP每分钟最多20次登录
+}
+
+
+def _check_rate_limit(category: str, user: str = None, ip: str = None):
+    """检查请求频率。返回 (allowed: bool, retry_after: int)"""
+    limits = RATE_LIMITS.get(category)
+    if not limits:
+        return True, 0
+
+    key = f"{category}:{user or ip or 'unknown'}"
+    max_req = limits.get("per_user") or limits.get("per_ip", 20)
+    window = limits.get("window", 60)
+    now = time.time()
+
+    timestamps = _rate_limits.get(key, [])
+    # 清理过期记录
+    timestamps = [t for t in timestamps if now - t < window]
+    _rate_limits[key] = timestamps
+
+    if len(timestamps) >= max_req:
+        retry_after = int(window - (now - timestamps[0]))
+        return False, max(1, retry_after)
+
+    timestamps.append(now)
+    return True, 0
+
+
+def _cleanup_rate_limits():
+    """定期清理过期的限流记录"""
+    now = time.time()
+    expired = []
+    for key, timestamps in _rate_limits.items():
+        active = [t for t in timestamps if now - t < max(RATE_LIMITS.get(key.split(":")[0], {}).get("window", 300), 60)]
+        if active:
+            _rate_limits[key] = active
+        else:
+            expired.append(key)
+    for key in expired:
+        del _rate_limits[key]
+    # 每100次请求清理一次
+    if len(_rate_limits) > 500:
+        for key in list(_rate_limits.keys())[:200]:
+            del _rate_limits[key]
+
 user_last_request = {}
 
 # 问答缓存：{(username, question_hash, memory_hash): answer} — 同样问题+同样记忆不重复调 AI
@@ -72,11 +140,29 @@ QA_CACHE_MAX = 200
 
 @contextmanager
 def get_db():
-    conn = sqlite3.connect("users.db", check_same_thread=False)
+    conn = sqlite3.connect("users.db", check_same_thread=False, timeout=10)
     conn.row_factory = sqlite3.Row
+    # WAL 模式：读写不互斥，并发性能更好
+    conn.execute("PRAGMA journal_mode=WAL")
+    # 忙等待 5 秒（写入冲突时重试而非立即失败）
+    conn.execute("PRAGMA busy_timeout=5000")
+    # 启用外键约束
+    conn.execute("PRAGMA foreign_keys=ON")
     try:
         yield conn
         conn.commit()
+    except sqlite3.OperationalError as e:
+        conn.rollback()
+        if "database is locked" in str(e).lower():
+            # 数据库锁：等待重试一次
+            import time as _time
+            _time.sleep(0.5)
+            try:
+                conn.commit()
+                return
+            except Exception:
+                conn.rollback()
+        raise
     except Exception:
         conn.rollback()
         raise
@@ -106,6 +192,8 @@ def init_db():
             conn.execute("ALTER TABLE users ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0")
         if "daily_bonus_date" not in columns:
             conn.execute("ALTER TABLE users ADD COLUMN daily_bonus_date TEXT NOT NULL DEFAULT ''")
+        if "email" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
 
         conn.execute(
             """
@@ -189,7 +277,7 @@ class UserRequest(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    text: str = Field(min_length=20, max_length=30000)
+    text: str = Field(min_length=20, max_length=60000)
     chapter_title: str = Field(min_length=1, max_length=120)
     source_url: Optional[str] = Field(default=None, max_length=1000)
     detail_level: str = Field(default="standard", pattern="^(brief|standard|detailed)$")
@@ -312,7 +400,11 @@ async def track_visit(req: Request):
 
 
 @app.post("/api/register")
-def register(req: UserRequest):
+def register(req: UserRequest, http_req: Request):
+    allowed, retry = _check_rate_limit("register", ip=http_req.client.host if http_req.client else "unknown")
+    if not allowed:
+        return fail(f"注册太频繁，请 {retry} 秒后再试")
+
     username = req.username.strip()
 
     if not username:
@@ -330,7 +422,11 @@ def register(req: UserRequest):
 
 
 @app.post("/api/login")
-def login(req: UserRequest):
+def login(req: UserRequest, http_req: Request):
+    allowed, retry = _check_rate_limit("login", ip=http_req.client.host if http_req.client else "unknown")
+    if not allowed:
+        return fail(f"登录太频繁，请 {retry} 秒后再试")
+
     username = req.username.strip()
 
     with get_db() as conn:
@@ -349,6 +445,251 @@ def login(req: UserRequest):
             )
 
     return ok({"token": create_token(username), "credits": user["credits"]})
+
+
+# ── 邮箱验证码登录 ──
+
+def _send_email(to_email: str, subject: str, body: str):
+    """通过 QQ 邮箱 SMTP 发送邮件。返回 (success, message)。"""
+    if not EMAIL_ENABLED:
+        return False, "邮件服务未配置（请设置 SMTP_USER 和 SMTP_PASS）"
+
+    msg = MIMEMultipart()
+    msg["From"] = SMTP_USER
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "html", "utf-8"))
+
+    try:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, [to_email], msg.as_string())
+        return True, "发送成功"
+    except smtplib.SMTPAuthenticationError:
+        return False, "邮件服务认证失败，请检查 SMTP 配置"
+    except smtplib.SMTPException as e:
+        return False, f"邮件发送失败：{e}"
+
+
+class SendCodeRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=100)
+
+
+@app.post("/api/auth/send-code")
+def send_code(req: SendCodeRequest, http_req: Request):
+    """发送邮箱验证码（6 位数字，5 分钟有效）"""
+    allowed, retry = _check_rate_limit("send_code", ip=http_req.client.host if http_req.client else "unknown")
+    if not allowed:
+        return fail(f"验证码发送太频繁，请 {retry} 秒后再试")
+
+    email = req.email.strip().lower()
+
+    # 基本邮箱格式校验
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return fail("邮箱格式不正确")
+
+    # 限制发送频率（60 秒内不能重复发送）
+    existing = _email_codes.get(email)
+    if existing and time.time() - existing.get("sent_at", 0) < 60:
+        return fail("验证码已发送，请 60 秒后再试")
+
+    code = str(random.randint(100000, 999999))
+    _email_codes[email] = {
+        "code": code,
+        "expires": time.time() + 300,  # 5 分钟有效
+        "sent_at": time.time(),
+    }
+
+    # 清理过期验证码
+    expired = [e for e, v in _email_codes.items() if v["expires"] < time.time()]
+    for e in expired:
+        del _email_codes[e]
+
+    body = f"""
+    <div style="font-family:Arial,sans-serif;max-width:400px;margin:0 auto;padding:20px;
+                background:#FFFDF7;border:1px solid #E8DDD2;border-radius:10px">
+      <h2 style="color:#5D4037">📖 鉴来助手</h2>
+      <p>你的登录验证码是：</p>
+      <div style="text-align:center;padding:16px;margin:12px 0;background:#F5EDE0;
+                  border-radius:8px;font-size:28px;font-weight:700;color:#3E2723;letter-spacing:6px">
+        {code}
+      </div>
+      <p style="color:#8D6E63;font-size:12px">5 分钟内有效，请勿分享给他人。</p>
+      <p style="color:#A1887F;font-size:11px">如果这不是你的操作，请忽略此邮件。</p>
+    </div>
+    """
+
+    if not EMAIL_ENABLED:
+        # 开发模式：验证码直接返回（方便测试）
+        print(f"[DEV] 邮箱验证码 for {email}: {code}")
+        return ok({"dev_code": code, "message": "开发模式：验证码已打印在控制台"})
+
+    ok_flag, msg = _send_email(email, "鉴来助手 · 登录验证码", body)
+    if not ok_flag:
+        return fail(msg)
+    return ok({"message": "验证码已发送，请查收邮件"})
+
+
+class VerifyCodeLoginRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=100)
+    code: str = Field(min_length=6, max_length=6)
+
+
+@app.post("/api/auth/verify-code")
+def verify_code_login(req: VerifyCodeLoginRequest):
+    """验证码登录：验证通过后自动注册或登录，返回 token"""
+    email = req.email.strip().lower()
+
+    record = _email_codes.get(email)
+    if not record:
+        return fail("请先获取验证码")
+    if record["expires"] < time.time():
+        del _email_codes[email]
+        return fail("验证码已过期，请重新获取")
+    if record["code"] != req.code:
+        return fail("验证码错误")
+
+    # 验证通过，清除验证码
+    del _email_codes[email]
+
+    # 从邮箱提取用户名（@ 前面的部分）
+    base_username = email.split("@")[0].replace(".", "_").replace("-", "_")
+
+    with get_db() as conn:
+        # 检查是否已有该邮箱的用户
+        existing = conn.execute(
+            "SELECT username FROM users WHERE email=?",
+            (email,),
+        ).fetchone()
+
+        if existing:
+            username = existing["username"]
+        else:
+            # 新用户：自动注册
+            username = base_username
+            # 处理重名
+            suffix = 1
+            while True:
+                try:
+                    conn.execute(
+                        "INSERT INTO users (username, password, email, credits, created_at) VALUES (?, ?, ?, 30, ?)",
+                        (username, "email_login_no_password", email, int(time.time())),
+                    )
+                    break
+                except sqlite3.IntegrityError:
+                    suffix += 1
+                    username = f"{base_username}{suffix}"
+
+        token = create_token(username)
+        credits = conn.execute(
+            "SELECT credits FROM users WHERE username=?",
+            (username,),
+        ).fetchone()["credits"]
+
+    return ok({
+        "token": token,
+        "username": username,
+        "credits": credits,
+        "is_new": not bool(existing),
+    })
+
+
+# ── 密码找回 ──
+
+class ForgotPasswordRequest(BaseModel):
+    username_or_email: str = Field(min_length=3, max_length=100)
+
+
+@app.post("/api/auth/forgot-password")
+def forgot_password(req: ForgotPasswordRequest):
+    """发送密码重置验证码到用户绑定的邮箱"""
+    identifier = req.username_or_email.strip()
+
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT username, email FROM users WHERE username=? OR email=?",
+            (identifier, identifier.lower()),
+        ).fetchone()
+
+    if not user:
+        # 不暴露用户是否存在，统一返回
+        return ok({"message": "如果该账号存在且绑定了邮箱，验证码已发送"})
+
+    email = user["email"]
+    if not email or "@" not in email:
+        return ok({"message": "该账号未绑定邮箱，请联系客服重置密码"})
+
+    # 发送验证码（复用 email login 的验证码机制）
+    code = str(random.randint(100000, 999999))
+    _email_codes[email] = {
+        "code": code,
+        "expires": time.time() + 300,
+        "sent_at": time.time(),
+    }
+
+    body = f"""
+    <div style="font-family:Arial,sans-serif;max-width:400px;margin:0 auto;padding:20px;
+                background:#FFFDF7;border:1px solid #E8DDD2;border-radius:10px">
+      <h2 style="color:#5D4037">📖 鉴来助手 · 密码重置</h2>
+      <p>你的密码重置验证码是：</p>
+      <div style="text-align:center;padding:16px;margin:12px 0;background:#F5EDE0;
+                  border-radius:8px;font-size:28px;font-weight:700;color:#3E2723;letter-spacing:6px">
+        {code}
+      </div>
+      <p style="color:#8D6E63;font-size:12px">5 分钟内有效。</p>
+      <p style="color:#A1887F;font-size:11px">如果这不是你的操作，请忽略。</p>
+    </div>
+    """
+
+    if not EMAIL_ENABLED:
+        print(f"[DEV] 密码重置验证码 for {email}: {code}")
+        return ok({"dev_code": code, "message": "开发模式：验证码已打印"})
+
+    ok_flag, msg = _send_email(email, "鉴来助手 · 密码重置", body)
+    if not ok_flag:
+        return fail(msg)
+    return ok({"message": "验证码已发送到绑定邮箱"})
+
+
+class ResetPasswordRequest(BaseModel):
+    username_or_email: str = Field(min_length=3, max_length=100)
+    code: str = Field(min_length=6, max_length=6)
+    new_password: str = Field(min_length=6, max_length=128)
+
+
+@app.post("/api/auth/reset-password")
+def reset_password(req: ResetPasswordRequest):
+    """验证码通过后重置密码"""
+    identifier = req.username_or_email.strip()
+
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT username, email FROM users WHERE username=? OR email=?",
+            (identifier, identifier.lower()),
+        ).fetchone()
+
+    if not user or not user["email"]:
+        return fail("账号不存在或未绑定邮箱")
+
+    email = user["email"]
+    record = _email_codes.get(email)
+    if not record:
+        return fail("请先获取验证码")
+    if record["expires"] < time.time():
+        del _email_codes[email]
+        return fail("验证码已过期")
+    if record["code"] != req.code:
+        return fail("验证码错误")
+
+    # 验证通过，重置密码
+    del _email_codes[email]
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE users SET password=? WHERE username=?",
+            (bcrypt_hash_password(req.new_password), user["username"]),
+        )
+
+    return ok({"message": "密码已重置，请使用新密码登录"})
 
 
 @app.get("/api/me")
@@ -386,6 +727,11 @@ def me(user=Depends(get_user)):
 
 @app.post("/api/analyze")
 def analyze(req: AnalyzeRequest, user=Depends(get_user)):
+    # 限流检查
+    allowed, retry = _check_rate_limit("analyze", user=user)
+    if not allowed:
+        return fail(f"请求太频繁，请 {retry} 秒后再试")
+
     now = time.time()
     last = user_last_request.get(user, 0)
     if now - last < 2:
@@ -462,10 +808,24 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
         )
         log_usage(conn, user, "analyze", f"分析章节: {req.chapter_title}", -1)
 
+    # 超长文本智能截断
+    analysis_text = req.text
+    truncated = False
+    MAX_CHARS = 12000
+    if len(analysis_text) > MAX_CHARS:
+        truncated = True
+        # 尽量在段落边界截断
+        cut_point = analysis_text.rfind("\n", 0, MAX_CHARS)
+        if cut_point < MAX_CHARS // 2:
+            cut_point = MAX_CHARS
+        analysis_text = analysis_text[:cut_point] + "\n\n[提示：章节过长，已截取前 {:.0f}% 内容进行分析]".format(
+            cut_point / len(req.text) * 100
+        )
+
     # 调用 AI 分析
     try:
         result = analyze_text(
-            req.text,
+            analysis_text,
             req.chapter_title,
             detail_level=req.detail_level,
             spoiler_free=req.spoiler_free,
@@ -507,7 +867,11 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
                 (book_id, book_id),
             )
 
-    return ok({"result": result, "cached": False, "book_id": book_id})
+    response_data = {"result": result, "cached": False, "book_id": book_id}
+    if truncated:
+        response_data["truncated"] = True
+        response_data["warning"] = f"章节过长（{len(req.text)}字），仅分析了前{len(analysis_text)}字"
+    return ok(response_data)
 
 
 @app.post("/api/feedback")
@@ -603,6 +967,10 @@ def _load_memories(conn, user: str, book_id: int, limit: int = 30):
 
 @app.post("/api/ask")
 def ask(req: AskRequest, user=Depends(get_user)):
+    allowed, retry = _check_rate_limit("ask", user=user)
+    if not allowed:
+        return fail(f"提问太频繁，请 {retry} 秒后再试")
+
     from services.ai_service import answer_from_memory
 
     with get_db() as conn:
@@ -1189,7 +1557,8 @@ def buy(req: BuyRequest, user=Depends(get_user)):
         {
             "order_id": order_id,
             "checkout_required": True,
-            "message": f"订单已创建。请通过微信/支付宝转账 {plan['amount']} 元并备注用户名「{user}」，客服确认后手动发放额度。",
+            "pay_url": f"/pay/{order_id}",
+            "message": f"订单已创建，请在支付页面完成转账",
         }
     )
 
@@ -1303,6 +1672,69 @@ def admin_add_credits(username: str, req: Request, _admin=Depends(verify_admin))
         log_usage(conn, username, "admin_credit", f"管理员调整额度 ({delta})", delta)
 
     return ok({"message": f"已调整 {username} 额度 ({delta:+d})"})
+
+
+@app.get("/pay/{order_id}")
+def pay_page(order_id: int):
+    """支付引导页面"""
+    with get_db() as conn:
+        order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+    if not order:
+        return HTMLResponse(content="<h2>订单不存在</h2>", status_code=404)
+
+    plans_display = {
+        "basic": "100 次额度包", "pro": "300 次额度包",
+        "monthly": "月卡（30天无限）", "earlybird": "早鸟高级版", "lifetime": "早鸟永久版",
+    }
+
+    return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>支付 - 鉴来助手</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:#2C2416;background:linear-gradient(180deg,#FBF8F0,#F5EDE0);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}}
+.card{{max-width:420px;width:100%;padding:28px 24px;background:#FFFDF7;border:1px solid #E8DDD2;border-radius:12px;box-shadow:0 4px 24px rgba(44,36,22,.1);text-align:center}}
+h2{{font-size:20px;color:#5D4037;margin-bottom:4px}}
+.order-id{{font-size:12px;color:#A1887F;margin-bottom:20px}}
+.amount{{font-size:36px;font-weight:800;color:#5D4037;margin:16px 0}}
+.plan-name{{font-size:14px;color:#8D6E63}}
+.pay-section{{margin:20px 0;padding:16px;background:#FFF8E1;border:1px solid #FFE082;border-radius:10px;text-align:left}}
+.pay-section h3{{font-size:14px;color:#E65100;margin-bottom:12px}}
+.pay-section .step{{font-size:13px;color:#5D4037;margin:8px 0;line-height:1.6}}
+.qr-placeholder{{width:180px;height:180px;margin:16px auto;border:2px dashed #D7CCC8;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#A1887F;font-size:13px}}
+.note{{font-size:11px;color:#A1887F;margin-top:16px}}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>📖 鉴来助手</h2>
+  <div class="order-id">订单号 #{order["id"]}</div>
+  <div class="plan-name">{plans_display.get(order["plan"], order["plan"])}</div>
+  <div class="amount">¥{order["amount"]}</div>
+
+  <div class="pay-section">
+    <h3>📱 扫码支付</h3>
+    <div class="qr-placeholder">
+      ⚙️ 请配置<br>支付二维码
+    </div>
+    <div class="step">1️⃣ 使用微信/支付宝扫描上方二维码</div>
+    <div class="step">2️⃣ 转账 <b>¥{order["amount"]}</b></div>
+    <div class="step">3️⃣ 在转账备注中填写：<b>{order["username"]}</b></div>
+    <div class="step">4️⃣ 支付完成后联系客服确认，或等待自动到账</div>
+  </div>
+
+  <div class="note">
+    当前状态：<b style="color:#E65100">{"已到账" if order["status"] == "fulfilled" else "待支付"}</b>
+    <br>如有疑问，请在插件弹窗中联系客服
+  </div>
+</div>
+</body>
+</html>
+""")
 
 
 @app.get("/admin")

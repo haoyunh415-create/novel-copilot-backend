@@ -102,10 +102,10 @@ def _call_ai(messages: list[dict], temperature: float = 0.2, timeout: int = 45, 
     raise last_error or RuntimeError("AI 调用失败")
 
 
-def _normalize_result(result: dict, raw: str):
-    graph = result.get("graph") or {}
+def _normalize_result(result: dict, raw: str, degraded: bool = False):
+    graph = result.get("graph") if isinstance(result, dict) else {}
     return {
-        "summary": str(result.get("summary") or "").strip(),
+        "summary": str(result.get("summary") or "").strip() or raw.strip()[:500],
         "characters": result.get("characters") if isinstance(result.get("characters"), list) else [],
         "foreshadowing": result.get("foreshadowing") if isinstance(result.get("foreshadowing"), list) else [],
         "terms": result.get("terms") if isinstance(result.get("terms"), list) else [],
@@ -114,6 +114,7 @@ def _normalize_result(result: dict, raw: str):
             "edges": graph.get("edges") if isinstance(graph.get("edges"), list) else [],
         },
         "raw": raw,
+        "degraded": degraded,
     }
 
 
@@ -164,9 +165,18 @@ def analyze_text(text: str, chapter_title: str, detail_level: str = "standard", 
     try:
         raw = payload["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"AI 响应格式异常") from exc
+        raise RuntimeError("AI 响应格式异常") from exc
 
-    parsed = _extract_json(raw)
+    # 尝试 JSON 解析，失败则降级为纯文本摘要
+    try:
+        parsed = _extract_json(raw)
+    except (ValueError, json.JSONDecodeError):
+        # 终极兜底：把 AI 返回的原始文本当作摘要
+        clean_text = re.sub(r"```[\s\S]*?```", "", raw).strip()
+        if len(clean_text) < 20:
+            raise RuntimeError("AI 返回内容异常，请稍后重试")
+        return _normalize_result({"summary": clean_text[:800]}, raw, degraded=True)
+
     return _normalize_result(parsed, raw)
 
 

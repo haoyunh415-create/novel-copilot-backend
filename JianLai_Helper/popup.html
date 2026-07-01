@@ -3,82 +3,274 @@
 <head>
 <meta charset="utf-8">
 <style>
+:root {
+  --ink: #2C2416;
+  --brown: #5D4037;
+  --brown-light: #8D6E63;
+  --gold: #C75B39;
+  --paper: #FBF8F0;
+  --card: #FFFDF7;
+  --border: #DDD0C4;
+  --green: #2E7D32;
+  --red: #C62828;
+  --shadow: 0 2px 12px rgba(44,36,22,.08);
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{width:300px;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#3d322b;background:#fdfaf5}
-.top-bar{background:linear-gradient(135deg,#4a3228,#6d4c41);padding:14px 16px;color:#fff}
-.top-bar .logo{font-size:17px;font-weight:700;letter-spacing:1px}
-.top-bar .tagline{font-size:10px;opacity:.75;margin-top:2px}
-.main{padding:12px 14px}
-input,select{width:100%;padding:9px 10px;margin:5px 0;border:1px solid #ddd0c4;border-radius:6px;font-size:12px;background:#fff;transition:border .2s}
-input:focus,select:focus{outline:none;border-color:#8d6e63;box-shadow:0 0 0 2px rgba(141,110,99,.12)}
-.btn{width:100%;min-height:34px;margin:4px 0;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
-.btn:active{transform:scale(.98)}
-.btn-primary{background:#5d4037;color:#fff}
-.btn-primary:hover{background:#4a3228}
-.btn-secondary{background:#ede4db;color:#5d4037}
-.btn-secondary:hover{background:#e0d4c8}
-.btn-accent{background:#f5a623;color:#fff}
-.btn-accent:hover{background:#e09515}
-.info-card{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin:8px 0;background:#fff;border:1px solid #e8ddd2;border-radius:8px}
-.info-card .label{font-size:11px;color:#9b8b7c}
-.info-card .value{font-size:16px;font-weight:700;color:#5d4037}
-.divider{margin:10px 0;border-top:1px solid #ede4db}
-.settings{font-size:10px;color:#b0a395}
+body{
+  width:320px;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  color:var(--ink);background:linear-gradient(180deg,#FBF8F0 0%,#F5EDE0 100%);
+  font-size:13px;
+}
+
+/* Header */
+.top-bar{
+  background:linear-gradient(135deg,#3E2723 0%,#5D4037 50%,#6D4C41 100%);
+  padding:16px 18px;color:#fff;position:relative;overflow:hidden;
+}
+.top-bar::after{
+  content:"";position:absolute;top:-30px;right:-20px;width:80px;height:80px;
+  border-radius:50%;background:rgba(255,255,255,.04);
+}
+.top-bar .logo{font-size:18px;font-weight:700;letter-spacing:2px;position:relative;z-index:1}
+.top-bar .tagline{font-size:10px;opacity:.65;margin-top:3px;position:relative;z-index:1}
+.top-bar .user-row{
+  display:flex;align-items:center;gap:6px;margin-top:8px;position:relative;z-index:1;
+  font-size:12px;opacity:.9;
+}
+.top-bar .user-avatar{
+  width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
+  display:flex;align-items:center;justify-content:center;font-size:11px;
+}
+
+/* Main */
+.main{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+
+/* Cards */
+.card{
+  padding:14px 16px;background:var(--card);border-radius:10px;
+  box-shadow:var(--shadow);border:1px solid var(--border);
+}
+.card-gradient{
+  background:linear-gradient(135deg,#FFF8E1,#FFFDF7);
+  border:1px solid #E8D5B0;
+}
+
+/* Credit display */
+.credit-display{
+  display:flex;align-items:center;justify-content:space-between;
+}
+.credit-display .credits{
+  font-size:28px;font-weight:800;color:var(--brown);
+  font-family:"SF Mono","Consolas",monospace;
+}
+.credit-display .credits.low{color:var(--gold)}
+.credit-display .label{font-size:10px;color:var(--brown-light);text-transform:uppercase;letter-spacing:1px}
+.credit-low-badge{
+  display:inline-block;padding:3px 8px;border-radius:10px;
+  background:#FFF3E0;color:#E65100;font-size:10px;font-weight:600;
+}
+
+/* Inputs */
+input{
+  width:100%;padding:10px 12px;border:1.5px solid var(--border);
+  border-radius:8px;font-size:13px;background:#fff;color:var(--ink);
+  transition:all .2s;
+}
+input:focus{
+  outline:none;border-color:var(--brown-light);
+  box-shadow:0 0 0 3px rgba(141,110,99,.1);
+}
+input.invalid{border-color:var(--red);background:#FFF5F5}
+
+/* Buttons */
+.btn{
+  width:100%;min-height:38px;border:0;border-radius:8px;
+  font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;
+  display:flex;align-items:center;justify-content:center;gap:4px;
+}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--brown);color:#fff;box-shadow:0 2px 8px rgba(93,64,55,.25)}
+.btn-primary:hover{background:#4E342E;box-shadow:0 4px 12px rgba(93,64,55,.35)}
+.btn-accent{
+  background:linear-gradient(135deg,#E65100,#F57C00);
+  color:#fff;box-shadow:0 2px 8px rgba(230,81,0,.2);
+  font-size:14px;min-height:42px;
+}
+.btn-accent:hover{box-shadow:0 4px 14px rgba(230,81,0,.3)}
+.btn-outline{
+  background:transparent;color:var(--brown);
+  border:1.5px solid var(--border);
+}
+.btn-outline:hover{background:rgba(93,64,55,.04);border-color:var(--brown-light)}
+.btn-ghost{
+  background:transparent;color:var(--brown-light);
+  font-size:11px;min-height:28px;
+}
+.btn-ghost:hover{color:var(--brown);background:rgba(93,64,55,.04)}
+
+/* Buy grid */
+.buy-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:6px;
+}
+.buy-plan-btn{
+  min-height:34px;border:1.5px solid var(--border);border-radius:8px;
+  background:#fff;color:var(--ink);font-size:11px;font-weight:600;
+  cursor:pointer;transition:all .2s;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:1px;
+}
+.buy-plan-btn:hover{border-color:var(--brown);background:#FFF8E1}
+.buy-plan-btn.selected{border-color:var(--gold);background:#FFF3E0;box-shadow:0 0 0 2px rgba(199,91,57,.15)}
+.buy-plan-btn .price{font-size:10px;color:var(--brown-light);font-weight:400}
+
+/* Buy result */
+.buy-result-card{
+  padding:12px;border-radius:8px;font-size:11px;line-height:1.7;
+}
+.buy-result-card.success{background:#E8F5E9;border:1px solid #C8E6C9;color:#2E7D32}
+.buy-result-card.pending{background:#E3F2FD;border:1px solid #BBDEFB;color:#1565C0}
+.buy-result-card .amount{font-size:20px;font-weight:800;margin:2px 0}
+
+/* Message */
+#message{
+  min-height:18px;font-size:12px;line-height:1.5;text-align:center;
+  padding:4px 8px;border-radius:6px;transition:all .2s;
+}
+#message.success{color:var(--green);background:#E8F5E9}
+#message.error{color:var(--red);background:#FFEBEE}
+
+/* Settings */
+.settings{
+  font-size:10px;color:#B0A395;
+}
 .settings input{font-size:10px;padding:6px 8px}
 .settings .btn{min-height:26px;font-size:10px}
-#message{min-height:16px;margin-top:6px;font-size:11px;line-height:1.4}
-#message.success{color:#2e7d32}
-#message.error{color:#c62828}
+
+/* Divider */
+.divider{margin:2px 0;border-top:1px solid var(--border)}
+.sep-text{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--brown-light)}
+.sep-text::before,.sep-text::after{content:"";flex:1;border-top:1px solid var(--border)}
+
+/* Animations */
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.fade-in{animation:fadeIn .3s ease}
 </style>
 </head>
 <body>
 
 <div class="top-bar">
-  <div class="logo">鉴来助手</div>
-  <div class="tagline">长篇无剧透记忆助手 · 前情提要 · 伏笔雷达</div>
+  <div class="logo">📖 鉴来助手</div>
+  <div class="tagline">追更不迷路的 AI 阅读助手</div>
+  <div id="user-greeting" class="user-row" style="display:none">
+    <div class="user-avatar">👤</div>
+    <span id="display-username">用户</span>
+  </div>
 </div>
 
 <div class="main">
 
   <!-- 登录区 -->
-  <div id="auth-box">
-    <input id="username" autocomplete="username" placeholder="用户名">
-    <input id="password" type="password" autocomplete="current-password" placeholder="密码">
-    <button id="login" class="btn btn-primary">登录</button>
-    <button id="register" class="btn btn-secondary">注册 · 领 30 次免费体验</button>
+  <div id="auth-box" class="card fade-in">
+    <div style="text-align:center;margin-bottom:12px">
+      <div style="font-size:28px;margin-bottom:4px">📚</div>
+      <div style="font-size:13px;font-weight:600;color:var(--ink)">欢迎使用鉴来助手</div>
+      <div style="font-size:10px;color:var(--brown-light);margin-top:2px">AI 驱动的长篇网文阅读伴侣</div>
+    </div>
+
+    <!-- 邮箱登录（默认） -->
+    <div id="email-login">
+      <input id="login-email" type="email" autocomplete="email" placeholder="输入邮箱地址" style="margin-bottom:6px">
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <input id="login-code" placeholder="6位验证码" maxlength="6" style="flex:1;font-size:16px;text-align:center;letter-spacing:4px;font-weight:700">
+        <button id="send-code-btn" class="btn btn-primary" style="width:auto;min-width:90px;font-size:11px;white-space:nowrap">获取验证码</button>
+      </div>
+      <button id="email-login-btn" class="btn btn-accent">验证码登录</button>
+      <div style="text-align:center;margin-top:6px;font-size:10px;color:var(--brown-light)">
+        首次登录自动注册 · 即领 <b style="color:var(--gold)">30 次</b> 免费额度
+      </div>
+    </div>
+
+    <!-- 用户名密码登录（折叠） -->
+    <div style="margin-top:10px">
+      <button id="toggle-pwd-login" class="btn btn-ghost" style="font-size:10px">使用用户名密码登录</button>
+    </div>
+    <div id="pwd-login" style="display:none">
+      <input id="username" autocomplete="username" placeholder="用户名" style="margin-bottom:6px">
+      <input id="password" type="password" autocomplete="current-password" placeholder="密码">
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button id="login" class="btn btn-primary" style="flex:1">登录</button>
+        <button id="register" class="btn btn-outline" style="flex:1">注册</button>
+      </div>
+      <div style="text-align:center;margin-top:6px">
+        <button id="forgot-pwd-link" class="btn btn-ghost" style="font-size:10px">忘记密码？</button>
+      </div>
+    </div>
+    <!-- 忘记密码表单 -->
+    <div id="forgot-pwd-box" style="display:none">
+      <input id="reset-identifier" placeholder="输入用户名或邮箱" style="margin-bottom:6px">
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <input id="reset-code" placeholder="验证码" maxlength="6" style="flex:1;text-align:center;letter-spacing:3px;font-weight:700">
+        <button id="send-reset-code-btn" class="btn btn-primary" style="width:auto;min-width:90px;font-size:11px">发送验证码</button>
+      </div>
+      <input id="new-password" type="password" placeholder="新密码（至少6位）" style="margin-bottom:6px">
+      <button id="reset-pwd-btn" class="btn btn-accent">重置密码</button>
+      <button id="back-to-login" class="btn btn-ghost" style="font-size:10px;margin-top:4px">← 返回登录</button>
+    </div>
   </div>
 
   <!-- 用户区 -->
   <div id="user-box" style="display:none">
-    <div class="info-card">
-      <span class="label">剩余额度</span>
-      <span class="value"><span id="credits">0</span> 次</span>
-    </div>
-    <button id="start" class="btn btn-accent">✦ 分析当前章节</button>
 
-    <div style="margin:6px 0;">
-      <select id="plan-select">
-        <option value="basic">100 次 · ¥9.9</option>
-        <option value="pro">300 次 · ¥19.9</option>
-        <option value="monthly">月卡 · ¥19.9</option>
-        <option value="earlybird">早鸟 · ¥49</option>
-        <option value="lifetime">永久 · ¥99</option>
-      </select>
-      <button id="buy" class="btn btn-secondary">购买套餐</button>
+    <!-- 额度卡片 -->
+    <div class="card card-gradient fade-in">
+      <div class="credit-display">
+        <div>
+          <div class="label">剩余额度</div>
+          <div class="credits" id="credits-text">0</div>
+        </div>
+        <div style="text-align:right">
+          <div class="label">每日签到</div>
+          <div style="font-size:13px;color:var(--green);font-weight:600">+5 次</div>
+        </div>
+      </div>
+      <div id="credit-low-msg" class="credit-low-badge" style="display:none;margin-top:8px"></div>
     </div>
 
-    <div class="divider"></div>
-    <button id="logout" class="btn btn-secondary">退出登录</button>
+    <!-- 主操作 -->
+    <button id="start" class="btn btn-accent">
+      <span>✦</span> 分析当前章节
+    </button>
+
+    <!-- 购买 -->
+    <div class="sep-text">💎 购买更多额度</div>
+    <div class="buy-grid">
+      <button class="buy-plan-btn" data-plan="basic">
+        <span>100 次</span><span class="price">¥9.9</span>
+      </button>
+      <button class="buy-plan-btn" data-plan="pro">
+        <span>300 次</span><span class="price">¥19.9</span>
+      </button>
+      <button class="buy-plan-btn" data-plan="monthly">
+        <span>月卡无限</span><span class="price">¥19.9</span>
+      </button>
+      <button class="buy-plan-btn" data-plan="lifetime">
+        <span>永久版</span><span class="price">¥99</span>
+      </button>
+    </div>
+    <div id="buy-result" style="display:none"></div>
+
+    <!-- 底部操作 -->
+    <button id="logout" class="btn btn-ghost">退出登录</button>
   </div>
 
   <div id="message"></div>
 
   <!-- 服务器设置 -->
-  <div class="divider"></div>
-  <div class="settings">
+  <div class="settings" style="text-align:center">
     <label>服务器地址</label>
-    <input id="api-url" placeholder="http://127.0.0.1:8000">
-    <button id="save-api" class="btn btn-secondary">保存</button>
+    <div style="display:flex;gap:4px;margin-top:4px">
+      <input id="api-url" placeholder="http://127.0.0.1:8000" style="flex:1">
+      <button id="save-api" class="btn btn-outline" style="width:auto;min-height:26px;font-size:10px;padding:0 8px">保存</button>
+    </div>
   </div>
 </div>
 

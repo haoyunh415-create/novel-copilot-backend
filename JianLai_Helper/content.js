@@ -133,7 +133,19 @@
 
   function getToken() {
     return new Promise((resolve) => {
-      chrome.storage.local.get(["token"], ({ token }) => resolve(token));
+      chrome.storage.local.get(["token"], function (result) {
+        var token = result.token;
+        // 检测过期
+        if (token) {
+          try {
+            var payload = JSON.parse(atob(token.split(".")[1]));
+            if ((payload.exp || 0) * 1000 < Date.now()) {
+              token = null;
+            }
+          } catch (_) { token = null; }
+        }
+        resolve(token);
+      });
     });
   }
 
@@ -213,7 +225,7 @@
 
     const style = document.createElement("style");
     style.id = "jianlai-helper-style";
-    style.textContent = "#jianlai-helper-window{position:fixed;top:16px;right:16px;width:min(460px,calc(100vw - 32px));height:min(760px,calc(100vh - 32px));z-index:2147483647;display:flex;flex-direction:column;color:#2f2925;background:#fbfaf6;border:1px solid #cbb9aa;border-radius:8px;box-shadow:0 14px 42px rgba(0,0,0,.26);overflow:hidden;font-family:Arial,'Microsoft YaHei',sans-serif}#jianlai-helper-window button{border:0;border-radius:6px;cursor:pointer;font:inherit}.jl-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;color:#fff;background:#5d4037}.jl-title{min-width:0}.jl-title strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.jl-title span{display:block;margin-top:2px;opacity:.78;font-size:12px}#jl-close{width:28px;height:28px;color:#fff;background:rgba(255,255,255,.14);font-size:18px}.jl-tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:#ddcec0}.jl-tab{padding:10px 6px;color:#5d4037;background:#efe8df;font-size:13px}.jl-tab.is-active{color:#fff;background:#8d6e63}.jl-main{flex:1;min-height:0;overflow:auto;padding:14px}.jl-panel{display:none}.jl-panel.is-active{display:block}.jl-card{margin-bottom:12px;padding:12px;border:1px solid #e2d9d1;border-radius:8px;background:#fff}.jl-card h3{margin:0 0 8px;font-size:14px}.jl-card p,.jl-list-item{margin:0;font-size:13px;line-height:1.65}.jl-list-item{padding:9px 0;border-top:1px solid #eee7df}.jl-list-item:first-child{border-top:0}.jl-empty{color:#8b7c72;font-size:13px}.jl-ask-box{display:grid;gap:8px}#jl-question{width:100%;min-height:76px;padding:10px;resize:vertical;border:1px solid #d7c8bc;border-radius:6px;color:#2f2925;background:#fff;font:inherit;font-size:13px;line-height:1.55}#jl-ask{min-height:36px;color:#fff;background:#6d4c41}#jl-answer{white-space:pre-wrap}#jl-graph{height:560px;border:1px solid #e2d9d1;border-radius:8px;background:#fff}.jl-footer{display:flex;flex-direction:column;gap:8px;padding:10px;border-top:1px solid #e2d9d1;background:#f4eee8}.jl-controls{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}.jl-controls select{width:100%;min-height:34px;padding:6px 8px;border:1px solid #d7c8bc;border-radius:6px;color:#3d332e;background:#fff;font:inherit;font-size:13px}.jl-toggle{display:flex;align-items:center;gap:5px;white-space:nowrap;color:#5f514a;font-size:12px}.jl-actions{display:flex;gap:8px}.jl-footer button{min-height:36px;padding:8px 10px}#jl-run{flex:1;color:#fff;background:#5d4037}#jl-review{flex:1;color:#fff;background:#8d6e63}#jl-export{width:72px;color:#5d4037;background:#e4d6ca}#jl-run:disabled{opacity:.65;cursor:wait}.jl-meta{margin-bottom:8px;color:#8b7c72;font-size:12px}.jl-book-bar{padding:6px 14px;background:#efe8df;font-size:11px;color:#6d4c41;border-bottom:1px solid #ddcec0}.jl-ov-stat{display:inline-flex;align-items:center;gap:4px;margin:4px 12px 4px 0;font-size:12px}.jl-ov-dot{width:8px;height:8px;border-radius:50%}.jl-ov-dot.open{background:#e65100}.jl-ov-dot.progress{background:#1565c0}.jl-ov-dot.payoff{background:#2e7d32}.jl-ov-item{padding:10px 12px;margin-bottom:8px;border-radius:8px;border:1px solid #e2d9d1;background:#fff;cursor:pointer}.jl-ov-item:hover{border-color:#8d6e63}.jl-ov-item .jl-ov-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}.jl-ov-item .jl-ov-clue{font-size:13px;font-weight:600;color:#3e2723}.jl-ov-item .jl-ov-confidence{font-size:11px;padding:2px 8px;border-radius:10px}.jl-ov-item .jl-ov-reason{font-size:12px;color:#6f625b;margin-top:4px}.jl-ov-item .jl-ov-chapter{font-size:11px;color:#8b7c72;margin-top:4px}.jl-ov-empty{text-align:center;padding:40px;color:#8b7c72;font-size:13px}.jl-qa-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.jl-qa-header h3{margin:0}.jl-qa-book-tag{padding:2px 8px;border-radius:10px;background:#efe8df;color:#6d4c41;font-size:11px}.jl-chat-msg{margin-bottom:10px;padding:8px 10px;border-radius:8px;font-size:13px;line-height:1.55}.jl-chat-msg.q{background:#f4eee8;border:1px solid #e2d9d1}.jl-chat-msg.a{background:#e8f5e9;border:1px solid #c8e6c9}.jl-chat-msg .jl-chat-label{font-weight:600;font-size:11px;margin-bottom:4px;display:block}.jl-chat-msg.q .jl-chat-label{color:#5d4037}.jl-chat-msg.a .jl-chat-label{color:#2e7d32}.jl-chat-warning{padding:6px 10px;margin-bottom:8px;border-radius:6px;background:#fff3e0;border:1px solid #ffe0b2;color:#e65100;font-size:12px}.jl-qa-buttons{display:flex;gap:8px}.jl-qa-buttons button{flex:1;min-height:34px;padding:8px 10px;font-size:13px}#jl-ask{color:#fff;background:#5d4037}#jl-suggest-btn{color:#5d4037;background:#efe8df;border:1px solid #d7c8bc}.jl-suggested{margin-bottom:10px}.jl-suggested-label{font-size:11px;color:#8b7c72;margin-bottom:4px}.jl-suggested-item{display:block;width:100%;padding:6px 8px;margin-bottom:3px;border:0;border-radius:4px;background:#fbfaf6;color:#5d4037;font-size:12px;text-align:left;cursor:pointer}.jl-suggested-item:hover{background:#efe8df}.jl-text-btn{display:block;width:100%;margin-top:6px;padding:4px 8px;border:0;background:0 0;color:#8b7c72;font-size:11px;text-align:center;cursor:pointer}.jl-text-btn:hover{color:#c62828}#jl-ask:disabled,#jl-suggest-btn:disabled{opacity:.65;cursor:wait}";
+    style.textContent = "#jianlai-helper-window{position:fixed;top:16px;right:16px;width:min(480px,calc(100vw - 32px));height:min(780px,calc(100vh - 32px));z-index:2147483647;display:flex;flex-direction:column;color:#2C2416;background:linear-gradient(180deg,#FBF8F0,#F5EDE0);border:1px solid #D7CCC8;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.08);overflow:hidden;font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;animation:jlFadeIn .25s ease}#jianlai-helper-window button{border:0;border-radius:8px;cursor:pointer;font:inherit;transition:all .18s ease}#jianlai-helper-window button:active{transform:scale(.97)}@keyframes jlFadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}.jl-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;color:#fff;background:linear-gradient(135deg,#3E2723,#5D4037,#6D4C41)}.jl-title{min-width:0}.jl-title strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;font-weight:700;letter-spacing:.5px}.jl-title span{display:block;margin-top:3px;opacity:.7;font-size:11px}#jl-close{width:30px;height:30px;color:#fff;background:rgba(255,255,255,.12);border-radius:50%!important;font-size:18px;display:flex;align-items:center;justify-content:center}#jl-close:hover{background:rgba(255,255,255,.22)}.jl-tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:0;background:#D7CCC8;padding:1px 0 0 0}.jl-tab{padding:11px 4px;color:#6D4C41;background:#EFEBE4;font-size:12px;font-weight:500;position:relative}.jl-tab:hover{background:#E8E0D5}.jl-tab.is-active{color:#fff;background:linear-gradient(180deg,#6D4C41,#5D4037);font-weight:600}.jl-tab.is-active::after{content:'';position:absolute;bottom:0;left:30%;right:30%;height:2px;background:#FFCC80;border-radius:2px}.jl-main{flex:1;min-height:0;overflow:auto;padding:16px;scroll-behavior:smooth}.jl-main::-webkit-scrollbar{width:5px}.jl-main::-webkit-scrollbar-thumb{background:#D7CCC8;border-radius:3px}.jl-panel{display:none;animation:jlFadeIn .2s ease}.jl-panel.is-active{display:block}.jl-card{margin-bottom:14px;padding:14px 16px;border:1px solid #E8DDD2;border-radius:10px;background:#FFFDF7;box-shadow:0 1px 4px rgba(44,36,22,.04);transition:box-shadow .2s}.jl-card:hover{box-shadow:0 2px 8px rgba(44,36,22,.08)}.jl-card h3{margin:0 0 10px;font-size:14px;font-weight:700;color:#3E2723}.jl-card p,.jl-list-item{margin:0;font-size:13px;line-height:1.7;color:#4E3E33}.jl-list-item{padding:10px 0;border-top:1px solid #F0E8DE}.jl-list-item:first-child{border-top:0}.jl-empty{color:#A1887F;font-size:13px;text-align:center;padding:20px}.jl-ask-box{display:grid;gap:10px}#jl-question{width:100%;min-height:80px;padding:12px;resize:vertical;border:1.5px solid #DDD0C4;border-radius:8px;color:#2C2416;background:#fff;font:inherit;font-size:13px;line-height:1.6;transition:border-color .2s}#jl-question:focus{outline:none;border-color:#8D6E63;box-shadow:0 0 0 3px rgba(141,110,99,.08)}#jl-ask{min-height:38px;color:#fff;background:linear-gradient(135deg,#5D4037,#6D4C41);font-weight:600}#jl-answer{white-space:pre-wrap}#jl-graph{height:580px;border:1px solid #E8DDD2;border-radius:10px;background:#FFFDF7;overflow:hidden}.jl-footer{display:flex;flex-direction:column;gap:10px;padding:12px 14px;border-top:1px solid #E8DDD2;background:#F5EDE0}.jl-controls{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}.jl-controls select{width:100%;min-height:36px;padding:6px 10px;border:1.5px solid #DDD0C4;border-radius:8px;color:#3E2723;background:#fff;font:inherit;font-size:13px;cursor:pointer;transition:border-color .2s}.jl-controls select:focus{outline:none;border-color:#8D6E63}.jl-toggle{display:flex;align-items:center;gap:6px;white-space:nowrap;color:#6D4C41;font-size:12px;cursor:pointer}.jl-actions{display:flex;gap:8px}.jl-footer button{min-height:38px;padding:8px 12px;font-size:13px;font-weight:600}#jl-run{flex:1;color:#fff;background:linear-gradient(135deg,#E65100,#F57C00);box-shadow:0 2px 8px rgba(230,81,0,.2)}#jl-run:hover{box-shadow:0 4px 14px rgba(230,81,0,.3)}#jl-review{flex:1;color:#fff;background:#6D4C41}#jl-full-report{flex:1;color:#fff;background:#8D6E63}#jl-export{width:60px;color:#5D4037;background:#E8DDD2}#jl-run:disabled{opacity:.6;cursor:wait;filter:grayscale(30%)}.jl-meta{margin-bottom:10px;padding:6px 10px;border-radius:6px;background:#F5EDE0;color:#8D6E63;font-size:11px;display:inline-block}.jl-book-bar{padding:8px 16px;background:linear-gradient(90deg,#F5EDE0,#EFEBE4);font-size:11px;color:#6D4C41;border-bottom:1px solid #E8DDD2;display:flex;align-items:center;gap:6px}.jl-book-bar::before{content:'📖';font-size:13px}.jl-ov-stat{display:inline-flex;align-items:center;gap:5px;margin:4px 14px 4px 0;font-size:12px;font-weight:500}.jl-ov-dot{width:9px;height:9px;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,.15)}.jl-ov-dot.open{background:#E65100}.jl-ov-dot.progress{background:#1565C0}.jl-ov-dot.payoff{background:#2E7D32}.jl-ov-item{padding:12px 14px;margin-bottom:10px;border-radius:10px;border:1px solid #E8DDD2;background:#FFFDF7;cursor:pointer;transition:all .15s}.jl-ov-item:hover{border-color:#8D6E63;box-shadow:0 2px 8px rgba(44,36,22,.06);transform:translateX(2px)}.jl-ov-item .jl-ov-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}.jl-ov-item .jl-ov-clue{font-size:13px;font-weight:600;color:#3E2723}.jl-ov-item .jl-ov-confidence{font-size:10px;padding:2px 10px;border-radius:12px;font-weight:600}.jl-ov-item .jl-ov-reason{font-size:12px;color:#6D4C41;margin-top:6px}.jl-ov-item .jl-ov-chapter{font-size:11px;color:#A1887F;margin-top:4px}.jl-ov-empty{text-align:center;padding:40px 20px;color:#A1887F;font-size:13px}.jl-qa-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.jl-qa-header h3{margin:0}.jl-qa-book-tag{padding:3px 10px;border-radius:12px;background:#EFEBE4;color:#6D4C41;font-size:11px;font-weight:500}.jl-chat-msg{margin-bottom:10px;padding:10px 12px;border-radius:10px;font-size:13px;line-height:1.6;animation:jlFadeIn .2s ease}.jl-chat-msg.q{background:#F5EDE0;border:1px solid #E8DDD2}.jl-chat-msg.a{background:#E8F5E9;border:1px solid #C8E6C9}.jl-chat-msg .jl-chat-label{font-weight:700;font-size:10px;margin-bottom:4px;display:block;text-transform:uppercase;letter-spacing:.5px}.jl-chat-msg.q .jl-chat-label{color:#5D4037}.jl-chat-msg.a .jl-chat-label{color:#2E7D32}.jl-chat-warning{padding:8px 12px;margin-bottom:10px;border-radius:8px;background:#FFF8E1;border:1px solid #FFE082;color:#E65100;font-size:12px}.jl-suggested{margin-bottom:12px}.jl-suggested-label{font-size:11px;color:#A1887F;margin-bottom:6px}.jl-suggested-item{display:block;width:100%;padding:8px 10px;margin-bottom:4px;border:1px solid #E8DDD2!important;border-radius:8px!important;background:#FFFDF7;color:#5D4037;font-size:12px;text-align:left;cursor:pointer}.jl-suggested-item:hover{background:#F5EDE0;border-color:#8D6E63!important}.jl-text-btn{display:block;width:100%;margin-top:8px;padding:4px 8px;border:0;background:0 0;color:#A1887F;font-size:11px;text-align:center;cursor:pointer}.jl-text-btn:hover{color:#C62828}.jl-qa-buttons{display:flex;gap:8px}.jl-qa-buttons button{flex:1;min-height:36px;padding:8px 12px;font-size:13px}#jl-ask{color:#fff;background:linear-gradient(135deg,#5D4037,#6D4C41)}#jl-suggest-btn{color:#5D4037;background:#EFEBE4;border:1.5px solid #D7CCC8!important}#jl-ask:disabled,#jl-suggest-btn:disabled{opacity:.6;cursor:wait}";
     document.documentElement.appendChild(style);
 
     win = document.createElement("div");
@@ -308,11 +320,14 @@
     document.querySelectorAll(".jl-panel").forEach((node) => {
       node.classList.toggle("is-active", node.id === "jl-panel-" + panel);
     });
-    if (panel === "graph" && network) {
-      setTimeout(() => network.fit(), 80);
+    if (panel === "graph") {
+      loadBookGraph();
     }
     if (panel === "overview") {
       loadOverview();
+    }
+    if (panel === "summary") {
+      loadAnalysisHistory();
     }
     if (panel === "qa") {
       updateQABookTag();
@@ -380,6 +395,25 @@
     // 添加反馈按钮
     showFeedbackButtons(result);
 
+    // 首次分析引导提示
+    if (!localStorage.getItem("JL_First_Analysis_Done")) {
+      localStorage.setItem("JL_First_Analysis_Done", "1");
+      var tipBanner = document.createElement("div");
+      tipBanner.className = "jl-card";
+      tipBanner.style.cssText = "border-left:3px solid #F57C00;background:#FFF8E1;margin-bottom:10px";
+      tipBanner.innerHTML =
+        '<h3 style="color:#E65100">🎉 分析完成！</h3>' +
+        '<p style="font-size:12px;color:#5D4037;margin:0">试试上方的标签页：<b>伏笔</b> 看隐藏线索 · <b>关系图</b> 看人物网络 · <b>问答</b> 向AI提问</p>';
+      var panel = document.getElementById("jl-panel-summary");
+      panel.insertBefore(tipBanner, panel.firstChild);
+      // 5 秒后自动淡化
+      setTimeout(function () {
+        tipBanner.style.transition = "opacity .5s";
+        tipBanner.style.opacity = "0";
+        setTimeout(function () { if (tipBanner.parentNode) tipBanner.remove(); }, 500);
+      }, 8000);
+    }
+
     // 生成离线推荐问题
     var offlineQs = generateOfflineQuestions();
     if (offlineQs.length > 0) {
@@ -444,12 +478,25 @@
     isRunning = true;
     const runBtn = document.getElementById("jl-run");
     runBtn.disabled = true;
-    runBtn.textContent = "分析中...";
+    runBtn.textContent = "⚡ 正在提取页面内容...";
+    runBtn.style.animation = "pulse 1.5s ease infinite";
+
+    // 添加脉冲动画
+    if (!document.getElementById("jl-pulse-style")) {
+      var pulseStyle = document.createElement("style");
+      pulseStyle.id = "jl-pulse-style";
+      pulseStyle.textContent = "@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}";
+      document.head.appendChild(pulseStyle);
+    }
 
     try {
       const chapterTitle = getChapterTitle();
       setText("#jl-heading", chapterTitle);
-      setText("#jl-summary", "正在分析章节内容...");
+      setText("#jl-summary", "🤖 正在连接 AI 服务...");
+      // 1.5 秒后更新状态（模拟阶段变化）
+      var statusTimer = setTimeout(function () {
+        setText("#jl-summary", "📝 正在分析章节内容和人物关系...");
+      }, 1500);
 
       const bookTitle = getBookTitle();
       const author = getAuthor();
@@ -479,6 +526,16 @@
       const result = normalizeResult(payload.data);
       renderResult(result);
 
+      // 长文本截断提醒
+      if (payload.data.truncated) {
+        var truncMeta = document.createElement("div");
+        truncMeta.className = "jl-meta";
+        truncMeta.style.cssText = "background:#FFF8E1;color:#E65100";
+        truncMeta.textContent = payload.data.warning || "章节过长，内容已截断";
+        var summaryCard = document.querySelector("#jl-panel-summary .jl-card");
+        if (summaryCard) summaryCard.appendChild(truncMeta);
+      }
+
       // 存内存变量
       if (payload.data.book_id) {
         var prevBookId = _currentBookId;
@@ -487,13 +544,18 @@
         const tag = document.getElementById("jl-book-tag");
         if (tag) tag.textContent = "当前：" + _currentBookTitle;
         updateQABookTag();
-        // 切书了 → 换聊天历史
+        // 切书了 → 换聊天历史 + 清除旧历史列表
         if (prevBookId !== _currentBookId) {
           _chatBookId = _currentBookId;
           _chatHistory = [];
           loadChatHistory();
           renderChatHistory();
+          var oldSection = document.getElementById("jl-history-section");
+          if (oldSection) oldSection.remove();
         }
+
+        // 加载分析历史（服务端数据，跨设备同步）
+        loadAnalysisHistory();
       }
 
       if (payload.data.cached) {
@@ -511,11 +573,37 @@
 
       localStorage.setItem(storageKey(), JSON.stringify(result));
     } catch (error) {
-      setText("#jl-summary", error.message || "分析失败，请稍后再试。");
+      var errMsg = error.message || "分析失败，请稍后再试。";
+
+      // 额度不足 → 签到提醒
+      if (errMsg.indexOf("额度不足") !== -1) {
+        errMsg += "\n\n💡 每天签到免费领 5 次额度，打开插件弹窗即可自动领取";
+      }
+
+      setText("#jl-summary", errMsg);
+
+      // 重试按钮
+      var summaryCard = document.querySelector("#jl-panel-summary .jl-card");
+      if (summaryCard) {
+        var oldRetry = document.getElementById("jl-retry-btn");
+        if (oldRetry) oldRetry.remove();
+
+        var retryBtn = document.createElement("button");
+        retryBtn.id = "jl-retry-btn";
+        retryBtn.textContent = "🔄 点击重试";
+        retryBtn.style.cssText = "margin-top:10px;padding:8px 16px;border:0;border-radius:6px;background:#5d4037;color:#fff;font-size:13px;cursor:pointer";
+        retryBtn.addEventListener("click", function () {
+          retryBtn.remove();
+          runAnalyze();
+        });
+        summaryCard.appendChild(retryBtn);
+      }
     } finally {
+      clearTimeout(statusTimer);
       isRunning = false;
       runBtn.disabled = false;
       runBtn.textContent = "重新分析";
+      runBtn.style.animation = "";
     }
   }
 
@@ -956,6 +1044,209 @@
     } catch (e) {
       document.getElementById("jl-overview-list").innerHTML =
         '<div class="jl-ov-empty">加载失败：' + (e.message || "网络错误") + '</div>';
+    }
+  }
+
+  // ═══════════ P3-1: 分析历史（服务端加载，跨设备同步） ═══════════
+
+  async function loadAnalysisHistory() {
+    if (!_currentBookId) return;
+
+    // 避免重复加载
+    var panel = document.getElementById("jl-panel-summary");
+    if (document.getElementById("jl-history-section")) return;
+
+    var API = await getAPI();
+    var token = await getToken();
+    if (!token) return;
+
+    try {
+      var resp = await fetch(API + "/api/books/" + _currentBookId + "/analyses", {
+        headers: { Authorization: "Bearer " + token }
+      });
+      var payload = await resp.json();
+      if (!payload.success || !payload.data) return;
+
+      var analyses = payload.data.analyses || [];
+      if (analyses.length === 0) return;
+
+      // 在概况面板底部插入历史章节列表
+      var section = document.createElement("div");
+      section.id = "jl-history-section";
+      section.className = "jl-card";
+      section.innerHTML =
+        '<h3>📚 本书已分析 ' + analyses.length + ' 章</h3>' +
+        '<p style="font-size:10px;color:#8b7c72;margin:2px 0 6px">点击章节可查看分析结果（已缓存内容）</p>' +
+        '<div style="max-height:200px;overflow-y:auto;margin-top:8px">' +
+        analyses.slice(-20).reverse().map(function (a) {
+          var date = a.created_at ? new Date(a.created_at * 1000).toLocaleDateString("zh-CN") : "";
+          return '<div class="jl-list-item jl-hist-item" data-chapter="' + (a.chapter_title || "") + '" style="font-size:12px;cursor:pointer;transition:background .15s" onmouseover="this.style.background=\'#f4eee8\'" onmouseout="this.style.background=\'\'">' +
+            '🔒 <b>' + (a.chapter_title || "未知章节") + '</b>' +
+            (date ? ' <span style="color:#8b7c72;font-size:11px">' + date + '</span>' : '') +
+          '</div>';
+        }).join("") +
+        '</div>';
+
+      // 绑定点击事件
+      section.querySelectorAll(".jl-hist-item").forEach(function (item) {
+        item.addEventListener("click", function () {
+          loadHistoryChapter(this.dataset.chapter);
+        });
+      });
+
+      var cards = panel.querySelectorAll(".jl-card");
+      var lastCard = cards[cards.length - 1];
+      if (lastCard) {
+        lastCard.insertAdjacentElement("afterend", section);
+      } else {
+        panel.appendChild(section);
+      }
+    } catch (_) {
+      // 静默失败，不影响主流程
+    }
+  }
+
+  function loadHistoryChapter(chapterTitle) {
+    // 从 localStorage 找缓存的该章节分析结果
+    var found = null;
+    var keys = Object.keys(localStorage);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (k.indexOf("JL_Archive_") === 0 && k.indexOf(chapterTitle) !== -1) {
+        try {
+          var data = JSON.parse(localStorage.getItem(k));
+          if (data && data.summary) { found = data; break; }
+        } catch (_) {}
+      }
+    }
+
+    if (found) {
+      renderResult(found);
+      var meta = document.createElement("div");
+      meta.className = "jl-meta";
+      meta.textContent = "📋 正在查看历史分析：" + chapterTitle;
+      document.getElementById("jl-summary").parentElement.insertBefore(meta, document.getElementById("jl-summary"));
+      // 切换到概况标签
+      switchPanel("summary");
+    } else {
+      alert("该章节的缓存已过期，请重新打开对应章节页面进行分析");
+    }
+  }
+
+  // ═══════════ P3-2: 全书累计人物关系图 ═══════════
+
+  async function loadBookGraph() {
+    var graphBox = document.getElementById("jl-graph");
+    if (!graphBox) return;
+
+    // 先显示加载状态
+    if (!_currentBookId) {
+      graphBox.innerHTML = '<div class="jl-ov-empty">请先分析当前章节，建立书籍上下文后再查看关系图</div>';
+      return;
+    }
+
+    graphBox.innerHTML = '<div class="jl-ov-empty">正在加载全书人物关系...</div>';
+
+    var API = await getAPI();
+    var token = await getToken();
+    if (!token) {
+      graphBox.innerHTML = '<div class="jl-ov-empty">请先登录</div>';
+      return;
+    }
+
+    try {
+      var resp = await fetch(API + "/api/books/" + _currentBookId + "/characters", {
+        headers: { Authorization: "Bearer " + token }
+      });
+      var payload = await resp.json();
+      if (!payload.success || !payload.data) {
+        graphBox.innerHTML = '<div class="jl-ov-empty">暂无人物数据</div>';
+        return;
+      }
+
+      var characters = payload.data.characters || [];
+      if (characters.length === 0) {
+        graphBox.innerHTML = '<div class="jl-ov-empty">分析更多章节后，这里将展示全书人物关系网</div>';
+        return;
+      }
+
+      // 构建累计关系图
+      var nodes = [];
+      var edges = [];
+      var seenNodes = {};
+      var seenEdges = {};
+
+      characters.forEach(function (char, idx) {
+        var id = "c" + idx;
+        if (seenNodes[char.name]) return;
+        seenNodes[char.name] = true;
+
+        var appearanceCount = (char.appearances || []).length;
+        var isCore = appearanceCount >= 3;
+        nodes.push({
+          id: id,
+          label: char.name,
+          level: isCore ? "core" : "normal",
+          color: {
+            background: isCore ? "#fff176" : "#d7ccc8",
+            border: "#8d6e63"
+          },
+          font: { size: isCore ? 18 : 14 },
+          shape: "dot",
+          size: isCore ? 28 : 18,
+          title: char.name + "（出场 " + appearanceCount + " 章）"
+        });
+
+        // 处理关系
+        var relationships = char.relationships || [];
+        relationships.forEach(function (rel) {
+          if (typeof rel === "string") {
+            // 简单的字符串关系
+            var parts = rel.split(/[：:与和、，,]+/);
+            parts.forEach(function (target) {
+              target = target.trim();
+              if (target && target !== char.name) {
+                var edgeKey = [char.name, target].sort().join("--");
+                if (!seenEdges[edgeKey]) {
+                  seenEdges[edgeKey] = true;
+                  edges.push({ from: id, to: target, label: "" });
+                }
+              }
+            });
+          }
+        });
+      });
+
+      // 给 edges 中的 to 字段匹配 node id
+      var nameToId = {};
+      nodes.forEach(function (n) { nameToId[n.label] = n.id; });
+      edges = edges.filter(function (e) {
+        if (nameToId[e.to]) { e.to = nameToId[e.to]; return true; }
+        return false;
+      });
+
+      // 用 vis-network 渲染
+      if (!window.vis) {
+        graphBox.innerHTML = '<div class="jl-ov-empty">图表库加载失败</div>';
+        return;
+      }
+
+      graphBox.innerHTML = "";
+      graphBox.style.height = "560px";
+      network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
+        edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
+        physics: { stabilization: true, barnesHut: { gravitationalConstant: -2000, springLength: 200 } },
+        interaction: { hover: true, tooltipDelay: 200 }
+      });
+
+      // 添加统计文字
+      var stats = document.createElement("div");
+      stats.style.cssText = "text-align:center;padding:4px;font-size:11px;color:#8b7c72";
+      stats.textContent = "全书 " + nodes.length + " 个人物 · " + edges.length + " 条关系";
+      graphBox.parentElement.appendChild(stats);
+
+    } catch (e) {
+      graphBox.innerHTML = '<div class="jl-ov-empty">加载失败：' + (e.message || "网络错误") + '</div>';
     }
   }
 
