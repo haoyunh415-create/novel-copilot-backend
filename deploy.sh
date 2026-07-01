@@ -25,15 +25,12 @@ fi
 
 # ---------- 3. 部署代码 ----------
 echo "[3/6] 部署代码..."
+REPO_URL="https://github.com/haoyunh415-create/novel-copilot-backend.git"
 if [ -d "$APP_DIR" ]; then
     cd "$APP_DIR"
-    git pull 2>/dev/null || echo "  (非 git 仓库，跳过拉取)"
+    git pull origin main 2>/dev/null || git pull 2>/dev/null || echo "  (拉取失败，继续使用已有代码)"
 else
-    # 如果你用 git，把仓库地址换到这里:
-    # git clone https://github.com/你的用户名/novel-copilot-backend.git "$APP_DIR"
-    echo "  请手动把项目代码放到 $APP_DIR"
-    echo "  或设置 git 仓库地址后重新运行此脚本"
-    exit 1
+    git clone "$REPO_URL" "$APP_DIR"
 fi
 
 # ---------- 4. Python 环境 ----------

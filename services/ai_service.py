@@ -7,22 +7,99 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# 使用 Session 并禁用系统代理（Windows 上 requests 会从注册表读取代理配置）
+_session = requests.Session()
+_session.trust_env = False
+
 API_KEY = os.getenv("DEEPSEEK_API_KEY")
 API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
 MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 
 def _extract_json(text: str):
+    """多策略 JSON 提取，应对 AI 返回格式不一致的情况"""
+    # 策略 1: ```json ... ``` 代码块
     match = re.search(r"```json\s*([\s\S]*?)```", text)
     if match:
         text = match.group(1)
 
+    # 策略 2: 找最外层花括号（从第一个 { 到最后一个 }）
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1 or end <= start:
         raise ValueError("AI 没有返回 JSON")
 
-    return json.loads(text[start : end + 1])
+    json_str = text[start: end + 1]
+
+    # 尝试直接解析
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        pass
+
+    # 策略 3: 修复常见 JSON 问题后重试
+    fixed = _fix_json(json_str)
+    return json.loads(fixed)
+
+
+def _fix_json(text: str) -> str:
+    """修复 AI 返回 JSON 的常见格式问题"""
+    # 移除尾随逗号（对象和数组）
+    text = re.sub(r",(\s*[}\]])", r"\1", text)
+    # 修复未闭合的字符串（在行尾添加引号）
+    lines = text.split("\n")
+    fixed_lines = []
+    for line in lines:
+        stripped = line.rstrip()
+        if stripped.endswith(": ") or stripped.endswith(":\t"):
+            stripped += '""'
+        fixed_lines.append(stripped)
+    text = "\n".join(fixed_lines)
+    # 移除注释行
+    text = re.sub(r"^\s*//.*$", "", text, flags=re.MULTILINE)
+    return text
+
+
+def _call_ai(messages: list[dict], temperature: float = 0.2, timeout: int = 45, max_retries: int = 2):
+    """调用 AI API，带自动重试"""
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            response = _session.post(
+                API_URL,
+                headers={
+                    "Authorization": f"Bearer {API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": MODEL,
+                    "messages": messages,
+                    "temperature": temperature,
+                },
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.Timeout:
+            last_error = RuntimeError("AI 服务响应超时")
+            if attempt < max_retries - 1:
+                timeout += 15  # 重试时延长超时
+        except requests.HTTPError as e:
+            status = e.response.status_code if e.response else None
+            if status in (429, 500, 502, 503) and attempt < max_retries - 1:
+                import time
+                time.sleep(1.5 * (attempt + 1))  # 指数退避
+                last_error = e
+                continue
+            raise
+        except requests.ConnectionError:
+            last_error = RuntimeError("无法连接 AI 服务")
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(1)
+                continue
+
+    raise last_error or RuntimeError("AI 调用失败")
 
 
 def _normalize_result(result: dict, raw: str):
@@ -58,56 +135,36 @@ def analyze_text(text: str, chapter_title: str, detail_level: str = "standard", 
         else "可以结合常识做阅读提示，但仍然不要透露章节正文之外的明确后文剧情。"
     )
 
-    prompt = f"""
-你是一个长篇小说阅读助手。{spoiler_rule}
+    # 截断过长文本（DeepSeek 上下文窗口充足，但过长会变慢）
+    text = text[:12000] if len(text) > 12000 else text
+
+    prompt = f"""你是一个专业的长篇小说阅读助手。{spoiler_rule}
 
 章节标题：{chapter_title}
 
-输出要求：
-1. 只能返回 JSON，不要 Markdown，不要解释。
-2. {summary_rule}
-3. characters 列出本章关键人物，字段为 name、note。
-4. foreshadowing 列出疑似伏笔或需要留意的线索，字段为 clue、reason、confidence，confidence 为 0-100。
-5. terms 列出读者可能需要记住的地名、物品、势力、术语，字段为 term、meaning。
-6. graph.nodes 用 id、label、level，level 只能是 core 或 normal。
-7. graph.edges 用 from、to、label。
+输出要求（严格 JSON，不能有任何其他内容）：
+1. {summary_rule}
+2. characters：列出本章出现/提及的 3-8 个关键人物。每人必须包含 name（名称）和 note（本章中的角色/动向，20字以内）
+3. foreshadowing：列出 0-5 条疑似伏笔或需要留意的线索。每条包含 clue（线索描述）、reason（为什么是伏笔，30字以内）、confidence（0-100 的可信度评分）
+4. terms：列出 0-5 个读者需要记住的地名、物品、势力、修炼术语。每条包含 term（术语）和 meaning（含义解释）
+5. graph.nodes：3-8 个关键人物节点，每人用 id、label、level（主角=core，其他=normal）
+6. graph.edges：人物之间的关系边，用 from、to、label（关系描述，如"师徒""盟友""敌对"）
 
-JSON 结构：
-{{
-  "summary": "",
-  "characters": [{{"name": "", "note": ""}}],
-  "foreshadowing": [{{"clue": "", "reason": "", "confidence": 70}}],
-  "terms": [{{"term": "", "meaning": ""}}],
-  "graph": {{
-    "nodes": [{{"id": "n1", "label": "", "level": "core"}}],
-    "edges": [{{"from": "n1", "to": "n2", "label": ""}}]
-  }}
-}}
+严格按此 JSON 结构返回：
+{{"summary":"...","characters":[{{"name":"","note":""}}],"foreshadowing":[{{"clue":"","reason":"","confidence":70}}],"terms":[{{"term":"","meaning":""}}],"graph":{{"nodes":[{{"id":"n1","label":"","level":"core"}}],"edges":[{{"from":"n1","to":"n2","label":""}}]}}}}
 
 章节正文：
-{text}
-"""
+{text}"""
 
-    response = requests.post(
-        API_URL,
-        headers={
-            "Authorization": f"Bearer {API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2,
-        },
-        timeout=45,
-    )
-    response.raise_for_status()
+    payload = _call_ai([
+        {"role": "system", "content": "你是一个专业的小说分析助手，只返回符合要求的 JSON，不输出任何其他内容。"},
+        {"role": "user", "content": prompt},
+    ], temperature=0.2, timeout=45)
 
-    payload = response.json()
     try:
         raw = payload["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"AI 响应格式异常：{payload}") from exc
+        raise RuntimeError(f"AI 响应格式异常") from exc
 
     parsed = _extract_json(raw)
     return _normalize_result(parsed, raw)
@@ -152,26 +209,14 @@ def answer_from_memory(question: str, memories: list[dict], spoiler_free: bool =
 {json.dumps(compact_memories, ensure_ascii=False)}
 """
 
-    response = requests.post(
-        API_URL,
-        headers={
-            "Authorization": f"Bearer {API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2,
-        },
-        timeout=45,
-    )
-    response.raise_for_status()
+    payload = _call_ai([
+        {"role": "user", "content": prompt},
+    ], temperature=0.2, timeout=45)
 
-    payload = response.json()
     try:
         return payload["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"AI 响应格式异常：{payload}") from exc
+        raise RuntimeError("AI 响应格式异常") from exc
 
 
 def review_recent_chapters(book_title: str, memories: list[dict]):
@@ -219,26 +264,14 @@ def review_recent_chapters(book_title: str, memories: list[dict]):
 5. **接下来阅读提示**：无剧透的阅读指引，帮读者留意可能重要的内容
 """
 
-    response = requests.post(
-        API_URL,
-        headers={
-            "Authorization": f"Bearer {API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
-        },
-        timeout=60,
-    )
-    response.raise_for_status()
+    payload = _call_ai([
+        {"role": "user", "content": prompt},
+    ], temperature=0.3, timeout=60)
 
-    payload = response.json()
     try:
         return payload["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"AI 响应格式异常：{payload}") from exc
+        raise RuntimeError("AI 响应格式异常") from exc
 
 
 def check_foreshadowing_payoff(current_analysis: dict, saved_clues: list[dict]):
@@ -283,26 +316,14 @@ def check_foreshadowing_payoff(current_analysis: dict, saved_clues: list[dict]):
 - reader_message 要简短，不透露后文
 """
 
-    response = requests.post(
-        API_URL,
-        headers={
-            "Authorization": f"Bearer {API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2,
-        },
-        timeout=60,
-    )
-    response.raise_for_status()
+    payload = _call_ai([
+        {"role": "user", "content": prompt},
+    ], temperature=0.2, timeout=60)
 
-    payload = response.json()
     try:
         raw = payload["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"AI 响应格式异常：{payload}") from exc
+        raise RuntimeError("AI 响应格式异常") from exc
 
     parsed = _extract_json(raw)
     matches = parsed.get("matches", [])
@@ -359,27 +380,14 @@ def suggest_questions(book_title: str, recent_analyses: list[dict]):
   {{"question": "问题文本", "reason": "为什么这个问题值得问（10字以内）"}}
 ]"""
 
-    response = requests.post(
-        API_URL,
-        headers={
-            "Authorization": f"Bearer {API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.5,
-            "max_tokens": 400,
-        },
-        timeout=30,
-    )
-    response.raise_for_status()
+    payload = _call_ai([
+        {"role": "user", "content": prompt},
+    ], temperature=0.5, timeout=30)
 
-    payload = response.json()
     try:
         raw = payload["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"AI 响应格式异常：{payload}") from exc
+        raise RuntimeError("AI 响应格式异常") from exc
 
     # 提取 JSON 数组
     match = re.search(r"```json\s*([\s\S]*?)```", raw)
@@ -393,3 +401,153 @@ def suggest_questions(book_title: str, recent_analyses: list[dict]):
             return questions[:5]
 
     return []
+
+
+# ── 全书复盘报告 ──
+
+FULL_REPORT_COST = 20  # 消耗积分
+CHUNK_SIZE = 60        # 每批处理的章节数
+
+
+def generate_full_report(book_title: str, memories: list[dict]):
+    """生成全书复盘报告。
+
+    memories: 按章节顺序排列的记忆列表，每项包含 chapter_title, summary, characters, foreshadowing, terms
+
+    策略：
+    - <=60章：单次生成完整报告
+    - >60章：分批生成阶段总结，再汇总成完整报告
+    """
+    if not API_KEY:
+        raise RuntimeError("缺少 DEEPSEEK_API_KEY")
+
+    if not memories:
+        raise RuntimeError("没有可用的章节记忆")
+
+    if len(memories) <= CHUNK_SIZE:
+        chapters_text = _build_chapters_text(memories)
+        return _do_single_pass_report(book_title, chapters_text, len(memories))
+
+    # 多阶段：分批 → 阶段总结 → 最终报告
+    chunks = [memories[i:i + CHUNK_SIZE] for i in range(0, len(memories), CHUNK_SIZE)]
+    phase_summaries = []
+
+    for i, chunk in enumerate(chunks):
+        chunk_start = i * CHUNK_SIZE + 1
+        chunk_end = min((i + 1) * CHUNK_SIZE, len(memories))
+        chunk_text = _build_chapters_text(chunk)
+        phase_summaries.append(
+            _generate_chunk_summary(book_title, chunk_text, chunk_start, chunk_end, len(chunk))
+        )
+
+    combined = "\n\n---\n\n".join(
+        f"## 阶段 {i + 1}（第{i * CHUNK_SIZE + 1}-{min((i + 1) * CHUNK_SIZE, len(memories))}章）\n{s}"
+        for i, s in enumerate(phase_summaries)
+    )
+
+    return _do_final_report(book_title, combined, len(memories))
+
+
+def _build_chapters_text(memories: list[dict]) -> str:
+    """将章节记忆列表压缩为文本。"""
+    parts = []
+    for m in memories:
+        lines = [f"【{m.get('chapter_title', '?')}】{m.get('summary', '')[:300]}"]
+        chars = [c.get("name", "") for c in m.get("characters", [])[:5] if c.get("name")]
+        if chars:
+            lines.append(f"  人物：{', '.join(chars)}")
+        clues = [c.get("clue", "") for c in m.get("foreshadowing", [])[:3] if c.get("clue")]
+        if clues:
+            lines.append(f"  线索：{'；'.join(clues)}")
+        terms = [t.get("term", "") for t in m.get("terms", [])[:3] if t.get("term")]
+        if terms:
+            lines.append(f"  术语：{'、'.join(terms)}")
+        parts.append("\n".join(lines))
+    return "\n".join(parts)
+
+
+def _generate_chunk_summary(book_title: str, chunk_text: str,
+                             chunk_start: int, chunk_end: int, count: int) -> str:
+    """为一批章节生成阶段性总结。"""
+    prompt = f"""你是《{book_title}》的阅读助手。请基于以下章节的结构化记忆，生成这部分内容的阶段性总结。
+
+章节范围：第{chunk_start}-{chunk_end}章（共 {count} 章）
+
+规则：
+1. 只基于给定记忆，不编造
+2. 按主线推进、人物变化、伏笔线索、关键事件四个维度总结
+3. 每条总结尽量具体，标注相关章节标题
+4. 控制在 800 字以内
+
+章节记忆：
+{chunk_text}
+
+请输出阶段性总结："""
+
+    payload = _call_ai([
+        {"role": "user", "content": prompt},
+    ], temperature=0.3, timeout=60)
+    try:
+        return payload["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("阶段总结生成失败") from exc
+
+
+def _do_single_pass_report(book_title: str, chapters_text: str, total: int) -> str:
+    """单阶段：直接从章节记忆生成完整复盘报告。"""
+    return _call_report_api(book_title, chapters_text, total,
+                            input_label="章节记忆", extra_rule="")
+
+
+def _do_final_report(book_title: str, combined_summaries: str, total: int) -> str:
+    """最终阶段：从阶段总结汇总生成完整复盘报告。"""
+    return _call_report_api(book_title, combined_summaries, total,
+                            input_label="阶段性总结",
+                            extra_rule="4. 各阶段的细节要有机整合，不要简单罗列阶段编号\n")
+
+
+def _call_report_api(book_title: str, content: str, total: int,
+                      input_label: str, extra_rule: str) -> str:
+    """统一的报告生成 API 调用。"""
+    prompt = f"""你是《{book_title}》的深度阅读复盘助手。请基于以下 {input_label}，生成一份完整的全书阅读复盘报告。
+
+覆盖章节数：{total} 章
+
+规则：
+1. 只基于给定内容，不编造，不引用后文
+2. 按以下结构组织报告，用 Markdown 格式
+3. 语言生动但有深度，像一个资深书评人
+{extra_rule}
+5. 每个重要事件尽量注明相关章节
+
+{input_label}：
+{content}
+
+请按以下结构输出报告：
+
+## 📖 主线梳理
+概述全书主线剧情走向，分阶段描述情节推进，标注关键转折点。
+
+## 🕐 关键剧情节点
+按时间线列出 5-10 个最重要的剧情节点，每个节点说明事件及其对后续剧情的影响。
+
+## 👥 人物谱系
+列出重要人物，每人包括：身份定位、性格特点、关键经历、与其他角色的关系。
+
+## 🔍 伏笔追踪
+列出重要的伏笔线索，注明埋设章节，以及是否已回收或仍在铺垫中。
+
+## 📚 世界观设定
+整理重要的世界观元素：势力分布、修炼/社会体系、特殊规则、关键地名和物品。
+
+## 💡 阅读建议
+基于已读内容，给读者的后续阅读建议，不剧透。"""
+
+    payload = _call_ai([
+        {"role": "system", "content": "你是一个专业的书评人和阅读复盘助手。"},
+        {"role": "user", "content": prompt},
+    ], temperature=0.4, timeout=120)
+    try:
+        return payload["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"报告生成失败：{payload}") from exc

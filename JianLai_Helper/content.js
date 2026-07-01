@@ -165,6 +165,46 @@
     return list;
   }
 
+  // ═══════════ 新手引导 ═══════════
+
+  function showOnboarding() {
+    const key = "JL_Onboarding_Done_v2";
+    if (localStorage.getItem(key) === "1") return;
+
+    const overlay = document.createElement("div");
+    overlay.id = "jl-onboarding";
+    overlay.innerHTML =
+      '<div style="position:fixed;inset:0;z-index:2147483649;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-family:Arial,\'Microsoft YaHei\',sans-serif">' +
+        '<div style="background:#fffef9;border-radius:12px;padding:24px 28px;max-width:380px;width:90%;box-shadow:0 18px 52px rgba(0,0,0,.32)">' +
+          '<div style="text-align:center;font-size:40px;margin-bottom:4px">📖</div>' +
+          '<h3 style="margin:0 0 4px;font-size:18px;color:#5d4037;text-align:center">3 步开始使用鉴来助手</h3>' +
+          '<p style="margin:0 0 20px;font-size:12px;color:#8b7c72;text-align:center">首次使用，跟着走一遍吧</p>' +
+          '<div style="display:flex;flex-direction:column;gap:14px;margin-bottom:22px">' +
+            '<div style="display:flex;gap:10px;align-items:flex-start">' +
+              '<span style="flex-shrink:0;width:26px;height:26px;border-radius:50%;background:#5d4037;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">1</span>' +
+              '<span style="font-size:13px;line-height:1.6">打开任意小说章节页面<br><small style="color:#8b7c72">起点、番茄、晋江等所有网站均支持</small></span>' +
+            '</div>' +
+            '<div style="display:flex;gap:10px;align-items:flex-start">' +
+              '<span style="flex-shrink:0;width:26px;height:26px;border-radius:50%;background:#f5a623;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">2</span>' +
+              '<span style="font-size:13px;line-height:1.6">点击右下角 <b style="color:#f5a623">"分析当前章节"</b> 按钮<br><small style="color:#8b7c72">AI 会自动提炼摘要、伏笔和人物关系</small></span>' +
+            '</div>' +
+            '<div style="display:flex;gap:10px;align-items:flex-start">' +
+              '<span style="flex-shrink:0;width:26px;height:26px;border-radius:50%;background:#8d6e63;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">3</span>' +
+              '<span style="font-size:13px;line-height:1.6">切换顶部标签探索更多<br><small style="color:#8b7c72"><b>概况</b> · <b>伏笔</b> · <b>问答</b> · <b>总览</b> · <b>关系图</b></small></span>' +
+            '</div>' +
+          '</div>' +
+          '<button id="jl-onboarding-close" style="width:100%;padding:11px;border:0;border-radius:8px;background:#5d4037;color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:all .15s">知道了，开始使用 ✨</button>' +
+          '<p style="margin:8px 0 0;font-size:10px;color:#b0a395;text-align:center">注册即送 30 次免费额度 · 每日签到 +5 次</p>' +
+        '</div>' +
+      '</div>';
+
+    document.body.appendChild(overlay);
+    overlay.querySelector("#jl-onboarding-close").addEventListener("click", function () {
+      overlay.remove();
+      localStorage.setItem(key, "1");
+    });
+  }
+
   // ═══════════ UI 创建 ═══════════
 
   function createWindow() {
@@ -239,6 +279,7 @@
         '<div class="jl-actions">' +
           '<button id="jl-run">分析当前章节</button>' +
           '<button id="jl-review">最近回顾</button>' +
+          '<button id="jl-full-report">全书复盘</button>' +
           '<button id="jl-export">导出</button>' +
         '</div>' +
       '</div>';
@@ -252,6 +293,7 @@
     win.querySelector("#jl-clear-chat").addEventListener("click", clearChatHistory);
     win.querySelector("#jl-export").addEventListener("click", exportResult);
     win.querySelector("#jl-review").addEventListener("click", reviewRecent);
+    win.querySelector("#jl-full-report").addEventListener("click", fullReport);
     win.querySelectorAll(".jl-tab").forEach((tab) => {
       tab.addEventListener("click", () => switchPanel(tab.dataset.panel));
     });
@@ -334,6 +376,9 @@
     }));
 
     drawGraph(result.graph);
+
+    // 添加反馈按钮
+    showFeedbackButtons(result);
 
     // 生成离线推荐问题
     var offlineQs = generateOfflineQuestions();
@@ -458,6 +503,12 @@
         meta.textContent = "已命中缓存，本次未消耗额度。";
         summaryEl.parentElement.insertBefore(meta, summaryEl);
       }
+
+      // 自动检测伏笔回收
+      if (_currentBookId) {
+        checkForeshadowingResult(_currentBookId);
+      }
+
       localStorage.setItem(storageKey(), JSON.stringify(result));
     } catch (error) {
       setText("#jl-summary", error.message || "分析失败，请稍后再试。");
@@ -465,6 +516,108 @@
       isRunning = false;
       runBtn.disabled = false;
       runBtn.textContent = "重新分析";
+    }
+  }
+
+  // ═══════════ 反馈按钮 ═══════════
+
+  var _feedbackGiven = null; // 当前分析反馈状态: 'good'|'bad'|null
+
+  function showFeedbackButtons(_result) {
+    var summaryCard = document.querySelector("#jl-panel-summary .jl-card");
+    if (!summaryCard) return;
+
+    // 移除旧反馈按钮
+    var old = document.getElementById("jl-feedback-row");
+    if (old) old.remove();
+    _feedbackGiven = null;
+
+    var row = document.createElement("div");
+    row.id = "jl-feedback-row";
+    row.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid #ede4db";
+    row.innerHTML =
+      '<span style="font-size:11px;color:#8b7c72">分析质量如何？</span>' +
+      '<button id="jl-fb-good" style="padding:4px 10px;border:1px solid #c8e6c9;border-radius:14px;background:#e8f5e9;cursor:pointer;font-size:16px" title="不错">👍</button>' +
+      '<button id="jl-fb-bad" style="padding:4px 10px;border:1px solid #ffcdd2;border-radius:14px;background:#ffebee;cursor:pointer;font-size:16px" title="不太好">👎</button>';
+    summaryCard.appendChild(row);
+
+    row.querySelector("#jl-fb-good").addEventListener("click", function () { sendFeedback("good"); });
+    row.querySelector("#jl-fb-bad").addEventListener("click", function () { sendFeedback("bad"); });
+  }
+
+  function sendFeedback(rating) {
+    if (_feedbackGiven) return;
+
+    getToken().then(function (token) {
+      if (!token) return;
+      getAPI().then(function (API) {
+        var detail = rating === "bad" ? (prompt("方便告诉我们哪里不满意吗？(可选)") || "") : "";
+
+        _feedbackGiven = rating;
+        var row = document.getElementById("jl-feedback-row");
+        if (row) {
+          row.innerHTML = '<span style="font-size:12px;color:#2e7d32">✅ 感谢反馈！</span>';
+        }
+
+        fetch(API + "/api/feedback", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + token
+          },
+          body: JSON.stringify({
+            chapter_title: getChapterTitle(),
+            rating: rating,
+            detail: detail,
+            book_id: _currentBookId || undefined
+          })
+        }).catch(function () {});
+      });
+    });
+  }
+
+  // ═══════════ 伏笔回收检测 ═══════════
+
+  async function checkForeshadowingResult(bookId) {
+    var token = await getToken();
+    if (!token) return;
+
+    var API = await getAPI();
+    try {
+      var res = await fetch(API + "/api/foreshadowing/check?book_id=" + bookId, {
+        headers: { Authorization: "Bearer " + token }
+      });
+      var payload = await res.json();
+      if (!payload.success || !payload.data) return;
+
+      var matches = payload.data.matches || [];
+      if (matches.length === 0) return;
+
+      // 在概况面板顶部显示伏笔回收通知
+      var panel = document.getElementById("jl-panel-summary");
+      var banner = document.createElement("div");
+      banner.className = "jl-card";
+      banner.style.cssText = "border-left:3px solid #2e7d32;background:#e8f5e9";
+      banner.innerHTML =
+        '<h3 style="color:#2e7d32">🔔 伏笔回收提醒</h3>' +
+        '<p style="font-size:12px;color:#4a7c59;margin-bottom:6px">本章可能回收了以下历史伏笔：</p>' +
+        matches.map(function (m) {
+          return '<div class="jl-list-item" style="border-color:#c8e6c9">' +
+            '<span style="color:#2e7d32;font-weight:600">💡 ' + (m.clue || "未知线索") + '</span>' +
+            (m.note ? '<br><small style="color:#6f8f7c">' + m.note + '</small>' : '') +
+            (m.chapter_title ? '<br><small style="color:#8b7c72">来自：' + m.chapter_title + '</small>' : '') +
+          '</div>';
+        }).join("");
+
+      // 插入到面板最前面
+      var firstCard = panel.querySelector(".jl-card");
+      if (firstCard) {
+        panel.insertBefore(banner, firstCard);
+      } else {
+        panel.appendChild(banner);
+      }
+    } catch (_) {
+      // 静默失败，不打断用户
     }
   }
 
@@ -852,6 +1005,80 @@
     }
   }
 
+  async function fullReport() {
+    const API = await getAPI();
+    const token = await getToken();
+    if (!token) {
+      setText("#jl-summary", "请先在插件弹窗中登录。");
+      return;
+    }
+
+    if (!_currentBookId) {
+      setText("#jl-summary", "请先分析当前章节，建立书籍上下文后再使用全书复盘功能。");
+      return;
+    }
+
+    const reportBtn = document.getElementById("jl-full-report");
+    const reviewBtn = document.getElementById("jl-review");
+    reportBtn.disabled = true;
+    reportBtn.textContent = "生成中...";
+    if (reviewBtn) reviewBtn.disabled = true;
+
+    // 切换到摘要面板
+    switchPanel("summary");
+    setText("#jl-summary", "正在生成全书复盘报告...\n\n这需要一些时间，已分析章节越多耗时越长，请耐心等待。");
+
+    try {
+      const response = await fetch(API + "/api/report/full", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + token
+        },
+        body: JSON.stringify({ book_id: _currentBookId })
+      });
+
+      const payload = await response.json();
+      if (!payload.success) throw new Error(payload.error || "报告生成失败");
+
+      setText("#jl-summary", payload.data.report);
+
+      // 显示报告元信息
+      const container = document.getElementById("jl-summary").parentElement;
+      const existingMeta = container.querySelector(".jl-report-meta");
+      if (existingMeta) existingMeta.remove();
+
+      const meta = document.createElement("div");
+      meta.className = "jl-report-meta";
+      meta.innerHTML =
+        '<span style="color:#5d4037">📊 全书复盘 · ' + payload.data.book_title +
+        ' · 覆盖 ' + payload.data.chapters_covered + ' 章 · 消耗 ' + payload.data.credits_cost + ' 积分</span>' +
+        ' <button id="jl-download-report" class="jl-text-btn">📥 下载报告</button>';
+      const summaryEl = document.getElementById("jl-summary");
+      container.insertBefore(meta, summaryEl);
+
+      // 下载按钮
+      document.getElementById("jl-download-report").addEventListener("click", function () {
+        const blob = new Blob(
+          ["# " + payload.data.book_title + " 全书复盘报告\n\n" + payload.data.report],
+          { type: "text/markdown;charset=utf-8" }
+        );
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = payload.data.book_title + "_全书复盘.md";
+        link.click();
+        URL.revokeObjectURL(url);
+      });
+    } catch (error) {
+      setText("#jl-summary", error.message || "报告生成失败，请稍后再试。");
+    } finally {
+      reportBtn.disabled = false;
+      reportBtn.textContent = "全书复盘";
+      if (reviewBtn) reviewBtn.disabled = false;
+    }
+  }
+
   function exportResult() {
     const data = JSON.parse(localStorage.getItem(storageKey()) || "{}");
     const title = getChapterTitle();
@@ -884,6 +1111,7 @@
     if (req.action !== "START_ANALYZE") return;
     const win = createWindow();
     win.querySelector("#jl-heading").textContent = getChapterTitle();
+    showOnboarding();
     sendResponse({ ok: true });
   });
 })();

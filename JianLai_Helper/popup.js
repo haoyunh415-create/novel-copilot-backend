@@ -26,8 +26,10 @@ document.addEventListener("DOMContentLoaded", () => {
   renderState();
 });
 
-function showMessage(text) {
-  $("message").textContent = text || "";
+function showMessage(text, type) {
+  const el = $("message");
+  el.textContent = text || "";
+  el.className = type || "";
 }
 
 function setLoading(buttonId, loading) {
@@ -78,6 +80,9 @@ async function renderState() {
     });
 
     $("credits").textContent = me.credits;
+    if (me.daily_bonus > 0) {
+      showMessage("✨ " + me.message);
+    }
     $("auth-box").style.display = "none";
     $("user-box").style.display = "block";
     showMessage("");
@@ -199,13 +204,22 @@ async function startAnalyze() {
 async function buy() {
   const token = await getToken();
   if (!token) {
-    showMessage("请先登录");
+    showMessage("请先登录", "error");
     return;
   }
 
   const plan = document.getElementById("plan-select").value;
+  const planNames = {
+    basic: "100 次额度包",
+    pro: "300 次额度包",
+    monthly: "月卡（30天无限）",
+    earlybird: "早鸟高级版",
+    lifetime: "早鸟永久版",
+  };
+  const planName = planNames[plan] || plan;
+
   setLoading("buy", true);
-  showMessage("正在创建购买请求...");
+  showMessage("正在处理...");
 
   try {
     const data = await apiFetch("/api/buy", {
@@ -214,10 +228,16 @@ async function buy() {
       body: JSON.stringify({ plan })
     });
 
-    showMessage(data.message || "已创建购买请求");
+    if (data.added) {
+      // Mock 模式：直接到账
+      showMessage("✅ 购买成功！" + data.message, "success");
+    } else {
+      // 真实支付模式
+      showMessage("📦 订单已创建：" + planName + "，请按提示完成支付", "success");
+    }
     renderState();
   } catch (error) {
-    showMessage(error.message);
+    showMessage(error.message, "error");
   } finally {
     setLoading("buy", false);
   }

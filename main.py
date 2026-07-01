@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from typing import Optional
 
 import jwt
+import requests as http_requests
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -16,6 +17,38 @@ from pydantic import BaseModel, Field
 from services.ai_service import analyze_text
 from services.auth_service import hash_password as bcrypt_hash_password
 from services.auth_service import verify_password as bcrypt_verify_password
+
+
+def friendly_error(exc: Exception) -> str:
+    """将技术异常映射为用户可理解的错误提示"""
+    msg = str(exc)
+
+    if "缺少 DEEPSEEK_API_KEY" in msg:
+        return "服务器 AI 服务未配置，请联系管理员"
+
+    if isinstance(exc, http_requests.Timeout) or "timeout" in msg.lower():
+        return "AI 服务响应超时，章节内容太长或网络不稳定，请稍后重试"
+
+    if isinstance(exc, http_requests.ConnectionError) or "connection" in msg.lower():
+        return "无法连接 AI 服务，请检查网络后重试"
+
+    if "429" in msg or "rate" in msg.lower():
+        return "AI 服务繁忙，请稍等几秒后重试"
+
+    if "401" in msg or "403" in msg:
+        return "AI 服务认证失败，请联系管理员检查 API Key"
+
+    if "500" in msg or "502" in msg or "503" in msg:
+        return "AI 服务暂时不可用，请稍后重试"
+
+    if "没有返回 JSON" in msg or "格式异常" in msg:
+        return "AI 返回格式异常，请重试或换个章节试试"
+
+    if "内容太短" in msg or "正文字数不足" in msg:
+        return "页面内容太少，请确保当前页面包含小说章节正文"
+
+    # 兜底：隐藏技术细节
+    return "操作失败，请稍后重试或联系客服"
 
 app = FastAPI(title="Novel Copilot Backend")
 
@@ -59,7 +92,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL,
-                credits INTEGER NOT NULL DEFAULT 3,
+                credits INTEGER NOT NULL DEFAULT 30,
                 created_at INTEGER NOT NULL DEFAULT 0
             )
             """
@@ -71,6 +104,8 @@ def init_db():
         }
         if "created_at" not in columns:
             conn.execute("ALTER TABLE users ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0")
+        if "daily_bonus_date" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN daily_bonus_date TEXT NOT NULL DEFAULT ''")
 
         conn.execute(
             """
@@ -180,9 +215,20 @@ class SuggestRequest(BaseModel):
     book_id: int
 
 
+class FeedbackRequest(BaseModel):
+    book_id: Optional[int] = None
+    chapter_title: str = Field(min_length=1, max_length=120)
+    rating: str = Field(pattern="^(good|bad)$")
+    detail: Optional[str] = Field(default=None, max_length=500)
+
+
 class ReviewRequest(BaseModel):
     book_id: int
     chapter_count: int = Field(default=10, ge=3, le=50)
+
+
+class FullReportRequest(BaseModel):
+    book_id: int
 
 
 def ok(data=None, msg="ok"):
@@ -275,7 +321,7 @@ def register(req: UserRequest):
     try:
         with get_db() as conn:
             conn.execute(
-                "INSERT INTO users (username, password, credits, created_at) VALUES (?, ?, 3, ?)",
+                "INSERT INTO users (username, password, credits, created_at) VALUES (?, ?, 30, ?)",
                 (username, bcrypt_hash_password(req.password), int(time.time())),
             )
         return ok(msg="注册成功")
@@ -307,16 +353,35 @@ def login(req: UserRequest):
 
 @app.get("/api/me")
 def me(user=Depends(get_user)):
+    from datetime import date as date_type
+    today = str(date_type.today())
+
     with get_db() as conn:
         row = conn.execute(
-            "SELECT credits FROM users WHERE username=?",
+            "SELECT credits, daily_bonus_date FROM users WHERE username=?",
             (user,),
         ).fetchone()
 
     if not row:
         raise HTTPException(status_code=401, detail="用户不存在")
 
-    return ok({"credits": row["credits"]})
+    credits = row["credits"]
+    daily_bonus = 0
+    if row["daily_bonus_date"] != today:
+        daily_bonus = 5
+        credits += daily_bonus
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE users SET credits=?, daily_bonus_date=? WHERE username=?",
+                (credits, today, user),
+            )
+            log_usage(conn, user, "daily_bonus", f"每日签到 +{daily_bonus} 次", daily_bonus)
+
+    return ok({
+        "credits": credits,
+        "daily_bonus": daily_bonus,
+        "message": f"今日签到已领取 {daily_bonus} 次额度" if daily_bonus else "今日已签到",
+    })
 
 
 @app.post("/api/analyze")
@@ -411,7 +476,7 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
                 "UPDATE users SET credits = credits + 1 WHERE username=?",
                 (user,),
             )
-        return fail(f"AI 分析失败：{exc}")
+        return fail(friendly_error(exc))
 
     # 保存分析结果
     with get_db() as conn:
@@ -443,6 +508,16 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
             )
 
     return ok({"result": result, "cached": False, "book_id": book_id})
+
+
+@app.post("/api/feedback")
+def submit_feedback(req: FeedbackRequest, user=Depends(get_user)):
+    """收集用户对分析结果的评价"""
+    detail = req.detail or ""
+    with get_db() as conn:
+        log_usage(conn, user, "feedback_" + req.rating,
+                   f"章节: {req.chapter_title}" + (f" | {detail}" if detail else ""), 0)
+    return ok({"message": "感谢反馈！"})
 
 
 def _find_book(conn, user: str, book_title: str = None, book_id: int = None, source_url: str = None):
@@ -592,7 +667,7 @@ def _do_ask(user: str, question: str, spoiler_free: bool, memories: list,
             spoiler_free=spoiler_free,
         )
     except Exception as exc:
-        return fail(f"问答失败：{exc}")
+        return fail(friendly_error(exc))
 
     # 写入缓存
     if len(qa_cache) >= QA_CACHE_MAX:
@@ -662,7 +737,7 @@ def suggest_questions_endpoint(req: SuggestRequest, user=Depends(get_user)):
             recent_analyses=recent,
         )
     except Exception as exc:
-        return fail(f"推荐问题生成失败：{exc}")
+        return fail(friendly_error(exc))
 
     return ok({"book_title": book["title"], "questions": questions})
 
@@ -797,9 +872,100 @@ def review_recent(req: ReviewRequest, user=Depends(get_user)):
             memories=memories,
         )
     except Exception as exc:
-        return fail(f"回顾生成失败：{exc}")
+        return fail(friendly_error(exc))
 
     return ok({"book_title": book["title"], "review": review, "chapters_covered": len(memories)})
+
+
+@app.post("/api/report/full")
+def generate_full_report(req: FullReportRequest, user=Depends(get_user)):
+    """全书复盘报告：基于全部已分析章节生成完整阅读复盘。
+
+    消耗 20 积分，返回结构化 Markdown 报告。
+    """
+    from services.ai_service import generate_full_report as do_full_report
+    from services.ai_service import FULL_REPORT_COST
+
+    with get_db() as conn:
+        book = conn.execute(
+            "SELECT id, title FROM books WHERE id=? AND username=?",
+            (req.book_id, user),
+        ).fetchone()
+        if not book:
+            return fail("书籍不存在")
+
+        rows = conn.execute(
+            """
+            SELECT chapter_title, chapter_index, result_json, created_at
+            FROM analyses
+            WHERE book_id=?
+            ORDER BY COALESCE(chapter_index, 999999), created_at ASC
+            """,
+            (req.book_id,),
+        ).fetchall()
+
+    if not rows:
+        return fail("该书还没有分析过的章节，请先分析至少几章后再生成复盘报告")
+
+    # 加载全部记忆
+    memories = []
+    for row in rows:
+        try:
+            result = json.loads(row["result_json"])
+        except json.JSONDecodeError:
+            continue
+        memories.append({
+            "chapter_title": row["chapter_title"],
+            "summary": result.get("summary", ""),
+            "characters": result.get("characters", []),
+            "foreshadowing": result.get("foreshadowing", []),
+            "terms": result.get("terms", []),
+        })
+
+    if not memories:
+        return fail("章节记忆解析失败")
+
+    # 检查额度
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT credits FROM users WHERE username=?",
+            (user,),
+        ).fetchone()
+
+        if not row or row["credits"] < FULL_REPORT_COST:
+            return fail(f"额度不足，全书复盘需要 {FULL_REPORT_COST} 次额度，当前剩余 {row['credits'] if row else 0} 次")
+
+        # 扣额度
+        conn.execute(
+            "UPDATE users SET credits = credits - ? WHERE username=? AND credits >= ?",
+            (FULL_REPORT_COST, user, FULL_REPORT_COST),
+        )
+        log_usage(conn, user, "full_report",
+                   f"全书复盘: 《{book['title']}》({len(memories)}章)", -FULL_REPORT_COST)
+
+    # 调用 AI 生成报告
+    try:
+        report = do_full_report(
+            book_title=book["title"],
+            memories=memories,
+        )
+    except Exception as exc:
+        # 失败退款
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE users SET credits = credits + ? WHERE username=?",
+                (FULL_REPORT_COST, user),
+            )
+            log_usage(conn, user, "full_report_refund",
+                       f"报告生成失败退款: {exc}", FULL_REPORT_COST)
+        return fail(friendly_error(exc))
+
+    return ok({
+        "book_title": book["title"],
+        "report": report,
+        "chapters_covered": len(memories),
+        "credits_cost": FULL_REPORT_COST,
+    })
 
 
 @app.get("/api/books/{book_id}/characters")
@@ -968,7 +1134,7 @@ def check_foreshadowing(book_id: int, chapter_text: str = None, user=Depends(get
             saved_clues=saved_clues,
         )
     except Exception as exc:
-        return fail(f"伏笔检测失败：{exc}")
+        return fail(friendly_error(exc))
 
     return ok({"book_title": book["title"], "current_chapter": latest["chapter_title"], "matches": matches})
 
