@@ -1408,6 +1408,34 @@ def list_book_characters(book_id: int, user=Depends(get_user)):
         except json.JSONDecodeError:
             continue
         chars = result.get("characters", [])
+
+        # 从 graph.edges 提取关系，映射 node ID → 人物名称
+        graph = result.get("graph", {})
+        graph_nodes = graph.get("nodes", [])
+        graph_edges = graph.get("edges", [])
+        # 构建 nodeId → name 的映射
+        node_name_map = {}
+        for node in graph_nodes:
+            nid = node.get("id", "")
+            nlabel = node.get("label", "")
+            if nid and nlabel:
+                node_name_map[nid] = nlabel
+
+        # 为每个人物生成关系描述
+        char_relationships = {}  # name -> [关系描述字符串]
+        for edge in graph_edges:
+            from_id = edge.get("from", "")
+            to_id = edge.get("to", "")
+            label = edge.get("label", "")
+            from_name = node_name_map.get(from_id, from_id)
+            to_name = node_name_map.get(to_id, to_id)
+            if from_name and to_name and from_name != to_name:
+                rel_text = f"与{to_name}{label}" if label else f"与{to_name}有关联"
+                char_relationships.setdefault(from_name, []).append(rel_text)
+                # 双向关系
+                rel_text_rev = f"与{from_name}{label}" if label else f"与{from_name}有关联"
+                char_relationships.setdefault(to_name, []).append(rel_text_rev)
+
         for char in chars:
             name = (char.get("name") or char.get("label") or "").strip()
             if not name:
@@ -1428,6 +1456,13 @@ def list_book_characters(book_id: int, user=Depends(get_user)):
                 entry["notes"].append(f"【{row['chapter_title']}】{char.get('note') or char.get('role')}")
             if char.get("relationship_hints"):
                 entry["relationships"].append(char["relationship_hints"])
+
+        # 把从 graph.edges 提取的关系也合并进去
+        for name, rels in char_relationships.items():
+            if name in characters_map:
+                for r in rels:
+                    if r not in characters_map[name]["relationships"]:
+                        characters_map[name]["relationships"].append(r)
 
     # 按出现次数降序排列
     character_list = sorted(characters_map.values(), key=lambda c: len(c["appearances"]), reverse=True)
