@@ -371,6 +371,49 @@ def get_user(req: Request):
     return username
 
 
+@app.get("/")
+def root():
+    return HTMLResponse(content="""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>鉴来助手 · 后端</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:#2C2416;
+background:linear-gradient(180deg,#FBF8F0,#F5EDE0);min-height:100vh;
+display:flex;align-items:center;justify-content:center;padding:20px}
+.card{max-width:420px;width:100%;padding:32px 24px;background:#FFFDF7;
+border:1px solid #E8DDD2;border-radius:12px;box-shadow:0 4px 24px rgba(44,36,22,.1);
+text-align:center}
+h2{font-size:22px;color:#5D4037;margin-bottom:4px}
+.status{display:inline-block;padding:4px 12px;border-radius:10px;
+background:#E8F5E9;color:#2E7D32;font-size:12px;font-weight:600;margin:12px 0}
+.links{display:flex;flex-direction:column;gap:8px;margin:20px 0;text-align:left}
+.links a{display:block;padding:12px 16px;background:#F5EDE0;border-radius:8px;
+color:#5D4037;text-decoration:none;font-size:14px;font-weight:500;
+transition:all .15s}
+.links a:hover{background:#E8DDD2;transform:translateX(2px)}
+.links a span{float:right;color:#A1887F;font-size:12px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>📖 鉴来助手</h2>
+  <p style="color:#A1887F;font-size:13px;margin-top:4px">后端服务运行中</p>
+  <div class="status">✅ 正常运行</div>
+  <div class="links">
+    <a href="/docs">📚 API 文档 <span>Swagger UI →</span></a>
+    <a href="/admin">⚙️ 管理后台 <span>→</span></a>
+    <a href="/api/health">💚 健康检查 <span>/api/health →</span></a>
+  </div>
+  <p style="font-size:10px;color:#B0A395">鉴来助手 · 追更不迷路的 AI 阅读助手</p>
+</div>
+</body>
+</html>
+""")
+
 @app.get("/api/health")
 def health():
     return ok({"status": "ok"})
