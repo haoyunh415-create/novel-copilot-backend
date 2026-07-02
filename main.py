@@ -1430,10 +1430,10 @@ def list_book_characters(book_id: int, user=Depends(get_user)):
             from_name = node_name_map.get(from_id, from_id)
             to_name = node_name_map.get(to_id, to_id)
             if from_name and to_name and from_name != to_name:
-                rel_text = f"与{to_name}{label}" if label else f"与{to_name}有关联"
+                rel_text = f"与{to_name}：{label}" if label else f"与{to_name}"
                 char_relationships.setdefault(from_name, []).append(rel_text)
                 # 双向关系
-                rel_text_rev = f"与{from_name}{label}" if label else f"与{from_name}有关联"
+                rel_text_rev = f"与{from_name}：{label}" if label else f"与{from_name}"
                 char_relationships.setdefault(to_name, []).append(rel_text_rev)
 
         for char in chars:
