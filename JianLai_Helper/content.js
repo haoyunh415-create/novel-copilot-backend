@@ -8,6 +8,7 @@
   let network = null;
   let _currentBookId = null;
   let _currentBookTitle = null;
+  let _graphMode = "chapter";  // "chapter" | "book"
 
   // ═══════════ 页面信息提取 ═══════════
 
@@ -277,7 +278,12 @@
           '<div class="jl-card"><h3>全书伏笔总览</h3><div id="jl-overview-stats"></div></div>' +
           '<div id="jl-overview-list"></div>' +
         '</section>' +
-        '<section id="jl-panel-graph" class="jl-panel"><div id="jl-graph"></div></section>' +
+        '<section id="jl-panel-graph" class="jl-panel">' +
+          '<div style="display:flex;justify-content:center;gap:8px;padding:8px 0">' +
+            '<button id="jl-graph-chapter" class="jl-graph-toggle" style="background:#5D4037;color:#fff">当前章节</button>' +
+            '<button id="jl-graph-book" class="jl-graph-toggle" style="background:#E8DDD2;color:#5D4037">全书累计</button>' +
+          '</div>' +
+          '<div id="jl-graph"></div></section>' +
       '</div>' +
       '<div class="jl-footer">' +
         '<div class="jl-controls">' +
@@ -306,6 +312,8 @@
     win.querySelector("#jl-export").addEventListener("click", exportResult);
     win.querySelector("#jl-review").addEventListener("click", reviewRecent);
     win.querySelector("#jl-full-report").addEventListener("click", fullReport);
+    win.querySelector("#jl-graph-chapter").addEventListener("click", function () { setGraphMode("chapter"); });
+    win.querySelector("#jl-graph-book").addEventListener("click", function () { setGraphMode("book"); });
     win.querySelectorAll(".jl-tab").forEach((tab) => {
       tab.addEventListener("click", () => switchPanel(tab.dataset.panel));
     });
@@ -321,7 +329,7 @@
       node.classList.toggle("is-active", node.id === "jl-panel-" + panel);
     });
     if (panel === "graph") {
-      loadBookGraph();
+      setGraphMode(_graphMode);
     }
     if (panel === "overview") {
       loadOverview();
@@ -446,6 +454,68 @@
       physics: { stabilization: true },
       interaction: { hover: true }
     });
+  }
+
+  function renderChapterGraph() {
+    // 从最后一次分析结果渲染当前章节关系图
+    var graphBox = document.getElementById("jl-graph");
+    if (!graphBox || !window.vis) return;
+
+    var key = storageKey();
+    var raw;
+    try { raw = localStorage.getItem(key); } catch (_) { return; }
+    if (!raw) {
+      graphBox.innerHTML = '<div class="jl-ov-empty">请先分析当前章节</div>';
+      return;
+    }
+    var data;
+    try { data = JSON.parse(raw); } catch (_) {
+      graphBox.innerHTML = '<div class="jl-ov-empty">数据解析失败</div>';
+      return;
+    }
+    var graph = data.graph;
+    if (!graph || !Array.isArray(graph.nodes) || graph.nodes.length === 0) {
+      graphBox.innerHTML = '<div class="jl-ov-empty">本章暂无人物关系数据</div>';
+      return;
+    }
+    graphBox.innerHTML = "";
+    graphBox.style.height = "560px";
+    var nodes = graph.nodes.map(function (node) {
+      return {
+        id: node.id || node.label,
+        label: node.label || node.id,
+        color: {
+          background: node.level === "core" ? "#fff176" : "#d7ccc8",
+          border: "#8d6e63"
+        },
+        font: { size: node.level === "core" ? 18 : 14 },
+        shape: "dot",
+        size: node.level === "core" ? 28 : 18
+      };
+    });
+    var edges = Array.isArray(graph.edges) ? graph.edges : [];
+    network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
+      edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
+      physics: { stabilization: true, barnesHut: { gravitationalConstant: -2000, springLength: 200 } },
+      interaction: { hover: true, tooltipDelay: 200 }
+    });
+  }
+
+  function setGraphMode(mode) {
+    _graphMode = mode;
+    var chapBtn = document.getElementById("jl-graph-chapter");
+    var bookBtn = document.getElementById("jl-graph-book");
+    if (chapBtn && bookBtn) {
+      if (mode === "chapter") {
+        chapBtn.style.background = "#5D4037"; chapBtn.style.color = "#fff";
+        bookBtn.style.background = "#E8DDD2"; bookBtn.style.color = "#5D4037";
+        renderChapterGraph();
+      } else {
+        bookBtn.style.background = "#5D4037"; bookBtn.style.color = "#fff";
+        chapBtn.style.background = "#E8DDD2"; chapBtn.style.color = "#5D4037";
+        loadBookGraph();
+      }
+    }
   }
 
   function storageKey() {
