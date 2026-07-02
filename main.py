@@ -178,7 +178,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL,
-                credits INTEGER NOT NULL DEFAULT 30,
+                credits INTEGER NOT NULL DEFAULT 10,
                 created_at INTEGER NOT NULL DEFAULT 0
             )
             """
@@ -194,6 +194,8 @@ def init_db():
             conn.execute("ALTER TABLE users ADD COLUMN daily_bonus_date TEXT NOT NULL DEFAULT ''")
         if "email" not in columns:
             conn.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
+        if "registration_ip" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN registration_ip TEXT NOT NULL DEFAULT ''")
 
         conn.execute(
             """
@@ -269,11 +271,6 @@ def init_db():
 
 
 init_db()
-
-
-class UserRequest(BaseModel):
-    username: str = Field(min_length=3, max_length=40)
-    password: str = Field(min_length=6, max_length=128)
 
 
 class AnalyzeRequest(BaseModel):
@@ -442,55 +439,7 @@ async def track_visit(req: Request):
     return ok({"tracked": True})
 
 
-@app.post("/api/register")
-def register(req: UserRequest, http_req: Request):
-    allowed, retry = _check_rate_limit("register", ip=http_req.client.host if http_req.client else "unknown")
-    if not allowed:
-        return fail(f"注册太频繁，请 {retry} 秒后再试")
-
-    username = req.username.strip()
-
-    if not username:
-        return fail("用户名不能为空")
-
-    try:
-        with get_db() as conn:
-            conn.execute(
-                "INSERT INTO users (username, password, credits, created_at) VALUES (?, ?, 30, ?)",
-                (username, bcrypt_hash_password(req.password), int(time.time())),
-            )
-        return ok(msg="注册成功")
-    except sqlite3.IntegrityError:
-        return fail("用户名已存在")
-
-
-@app.post("/api/login")
-def login(req: UserRequest, http_req: Request):
-    allowed, retry = _check_rate_limit("login", ip=http_req.client.host if http_req.client else "unknown")
-    if not allowed:
-        return fail(f"登录太频繁，请 {retry} 秒后再试")
-
-    username = req.username.strip()
-
-    with get_db() as conn:
-        user = conn.execute(
-            "SELECT * FROM users WHERE username=?",
-            (username,),
-        ).fetchone()
-
-        if not user or not verify_user_password(req.password, user["password"]):
-            return fail("用户名或密码错误")
-
-        if not user["password"].startswith("$2"):
-            conn.execute(
-                "UPDATE users SET password=? WHERE username=?",
-                (bcrypt_hash_password(req.password), username),
-            )
-
-    return ok({"token": create_token(username), "credits": user["credits"]})
-
-
-# ── 邮箱验证码登录 ──
+# ── 邮箱验证码登录（唯一登录方式）──
 
 def _send_email(to_email: str, subject: str, body: str):
     """通过 QQ 邮箱 SMTP 发送邮件。返回 (success, message)。"""
@@ -579,8 +528,9 @@ class VerifyCodeLoginRequest(BaseModel):
 
 
 @app.post("/api/auth/verify-code")
-def verify_code_login(req: VerifyCodeLoginRequest):
+def verify_code_login(req: VerifyCodeLoginRequest, http_req: Request):
     """验证码登录：验证通过后自动注册或登录，返回 token"""
+    client_ip = http_req.client.host if http_req.client else "unknown"
     email = req.email.strip().lower()
 
     record = _email_codes.get(email)
@@ -608,6 +558,14 @@ def verify_code_login(req: VerifyCodeLoginRequest):
         if existing:
             username = existing["username"]
         else:
+            # 新用户：检查 IP 上限
+            ip_count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM users WHERE registration_ip=?",
+                (client_ip,),
+            ).fetchone()["cnt"]
+            if ip_count >= 3:
+                return fail("该网络环境注册已达上限，请使用已有账号或联系客服")
+
             # 新用户：自动注册
             username = base_username
             # 处理重名
@@ -615,8 +573,8 @@ def verify_code_login(req: VerifyCodeLoginRequest):
             while True:
                 try:
                     conn.execute(
-                        "INSERT INTO users (username, password, email, credits, created_at) VALUES (?, ?, ?, 30, ?)",
-                        (username, "email_login_no_password", email, int(time.time())),
+                        "INSERT INTO users (username, password, email, credits, created_at, registration_ip) VALUES (?, ?, ?, 10, ?, ?)",
+                        (username, "email_login_no_password", email, int(time.time()), client_ip),
                     )
                     break
                 except sqlite3.IntegrityError:
@@ -752,7 +710,7 @@ def me(user=Depends(get_user)):
     credits = row["credits"]
     daily_bonus = 0
     if row["daily_bonus_date"] != today:
-        daily_bonus = 5
+        daily_bonus = 8
         credits += daily_bonus
         with get_db() as conn:
             conn.execute(

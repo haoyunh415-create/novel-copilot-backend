@@ -17,18 +17,22 @@ function setAPI(url) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  $("login").addEventListener("click", login);
-  $("register").addEventListener("click", register);
   $("start").addEventListener("click", startAnalyze);
   $("logout").addEventListener("click", logout);
   $("save-api").addEventListener("click", saveApiUrl);
+  $("toggle-advanced").addEventListener("click", function () {
+    var box = $("advanced-settings");
+    var btn = $("toggle-advanced");
+    if (box.style.display === "none") {
+      box.style.display = "block";
+      btn.textContent = "⚙ 收起设置";
+    } else {
+      box.style.display = "none";
+      btn.textContent = "⚙ 高级设置";
+    }
+  });
   $("send-code-btn").addEventListener("click", sendEmailCode);
   $("email-login-btn").addEventListener("click", emailLogin);
-  $("toggle-pwd-login").addEventListener("click", togglePwdLogin);
-  $("forgot-pwd-link").addEventListener("click", showForgotPwd);
-  $("back-to-login").addEventListener("click", hideForgotPwd);
-  $("send-reset-code-btn").addEventListener("click", sendResetCode);
-  $("reset-pwd-btn").addEventListener("click", doResetPassword);
   // 套餐按钮
   document.querySelectorAll(".buy-plan-btn").forEach(function (btn) {
     btn.addEventListener("click", function () { buy(btn.dataset.plan); });
@@ -136,76 +140,9 @@ async function renderState() {
   }
 }
 
-async function login() {
-  const username = $("username").value.trim();
-  const password = $("password").value;
-
-  if (!username || !password) {
-    showMessage("请输入用户名和密码");
-    return;
-  }
-
-  setLoading("login", true);
-  showMessage("正在登录...");
-
-  try {
-    const data = await apiFetch("/api/login", {
-      method: "POST",
-      body: JSON.stringify({ username, password })
-    });
-
-    chrome.storage.local.set({ token: data.token, username: username }, function () {
-      showPostLoginGuide();
-      renderState();
-    });
-  } catch (error) {
-    showMessage(error.message);
-  } finally {
-    setLoading("login", false);
-  }
-}
-
-async function register() {
-  const username = $("username").value.trim();
-  const password = $("password").value;
-
-  if (!username || !password) {
-    showMessage("请输入用户名和密码");
-    return;
-  }
-
-  setLoading("register", true);
-  showMessage("正在注册...");
-
-  try {
-    await apiFetch("/api/register", {
-      method: "POST",
-      body: JSON.stringify({ username, password })
-    });
-
-    showMessage("注册成功，现在可以登录");
-  } catch (error) {
-    showMessage(error.message, "error");
-  } finally {
-    setLoading("register", false);
-  }
-}
-
-// ── 邮箱验证码登录 ──
+// ── 邮箱验证码登录（唯一登录方式）──
 
 var _sendCodeCooldown = 0;
-
-function togglePwdLogin() {
-  var pwd = $("pwd-login");
-  var btn = $("toggle-pwd-login");
-  if (pwd.style.display === "none") {
-    pwd.style.display = "block";
-    btn.textContent = "收起用户名密码登录";
-  } else {
-    pwd.style.display = "none";
-    btn.textContent = "使用用户名密码登录";
-  }
-}
 
 async function sendEmailCode() {
   var email = $("login-email").value.trim();
@@ -277,7 +214,7 @@ async function emailLogin() {
       token: data.token,
       username: data.username
     }, function () {
-      showMessage(data.is_new ? "欢迎注册！已领取 30 次额度" : "登录成功", "success");
+      showMessage(data.is_new ? "欢迎注册！已领取 10 次额度" : "登录成功", "success");
       $("login-code").value = "";
       // 登录后引导
       showPostLoginGuide();
@@ -295,66 +232,6 @@ function showPostLoginGuide() {
   msg.className = "success";
   msg.innerHTML = '登录成功！<br><span style="font-size:10px;opacity:.8">📖 打开任意小说页面 → 点"分析当前章节"即可开始</span>';
   setTimeout(function () { msg.innerHTML = ""; msg.className = ""; }, 5000);
-}
-
-// ── 忘记密码 ──
-
-function showForgotPwd() {
-  $("email-login").style.display = "none";
-  $("forgot-pwd-box").style.display = "block";
-  document.querySelector("#auth-box .btn-ghost").style.display = "none";
-  showMessage("");
-}
-
-function hideForgotPwd() {
-  $("email-login").style.display = "block";
-  $("forgot-pwd-box").style.display = "none";
-  document.querySelector("#auth-box .btn-ghost").style.display = "";
-  showMessage("");
-}
-
-async function sendResetCode() {
-  var identifier = $("reset-identifier").value.trim();
-  if (!identifier) {
-    showMessage("请输入用户名或邮箱", "error");
-    return;
-  }
-  setLoading("send-reset-code-btn", true);
-  try {
-    await apiFetch("/api/auth/forgot-password", {
-      method: "POST",
-      body: JSON.stringify({ username_or_email: identifier })
-    });
-    showMessage("如果账号存在且绑定了邮箱，验证码已发送", "success");
-  } catch (error) {
-    showMessage(error.message, "error");
-  } finally {
-    setLoading("send-reset-code-btn", false);
-  }
-}
-
-async function doResetPassword() {
-  var identifier = $("reset-identifier").value.trim();
-  var code = $("reset-code").value.trim();
-  var newPwd = $("new-password").value;
-
-  if (!identifier || code.length !== 6 || newPwd.length < 6) {
-    showMessage("请填写所有字段（密码至少6位）", "error");
-    return;
-  }
-  setLoading("reset-pwd-btn", true);
-  try {
-    await apiFetch("/api/auth/reset-password", {
-      method: "POST",
-      body: JSON.stringify({ username_or_email: identifier, code: code, new_password: newPwd })
-    });
-    showMessage("密码已重置，请返回登录", "success");
-    setTimeout(hideForgotPwd, 1500);
-  } catch (error) {
-    showMessage(error.message, "error");
-  } finally {
-    setLoading("reset-pwd-btn", false);
-  }
 }
 
 async function startAnalyze() {

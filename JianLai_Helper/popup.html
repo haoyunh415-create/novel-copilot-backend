@@ -185,36 +185,10 @@ input.invalid{border-color:var(--red);background:#FFF5F5}
       </div>
       <button id="email-login-btn" class="btn btn-accent">验证码登录</button>
       <div style="text-align:center;margin-top:6px;font-size:10px;color:var(--brown-light)">
-        首次登录自动注册 · 即领 <b style="color:var(--gold)">30 次</b> 免费额度
+        首次登录自动注册 · 即领 <b style="color:var(--gold)">10 次</b> 免费额度
       </div>
     </div>
 
-    <!-- 用户名密码登录（折叠） -->
-    <div style="margin-top:10px">
-      <button id="toggle-pwd-login" class="btn btn-ghost" style="font-size:10px">使用用户名密码登录</button>
-    </div>
-    <div id="pwd-login" style="display:none">
-      <input id="username" autocomplete="username" placeholder="用户名" style="margin-bottom:6px">
-      <input id="password" type="password" autocomplete="current-password" placeholder="密码">
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <button id="login" class="btn btn-primary" style="flex:1">登录</button>
-        <button id="register" class="btn btn-outline" style="flex:1">注册</button>
-      </div>
-      <div style="text-align:center;margin-top:6px">
-        <button id="forgot-pwd-link" class="btn btn-ghost" style="font-size:10px">忘记密码？</button>
-      </div>
-    </div>
-    <!-- 忘记密码表单 -->
-    <div id="forgot-pwd-box" style="display:none">
-      <input id="reset-identifier" placeholder="输入用户名或邮箱" style="margin-bottom:6px">
-      <div style="display:flex;gap:6px;margin-bottom:6px">
-        <input id="reset-code" placeholder="验证码" maxlength="6" style="flex:1;text-align:center;letter-spacing:3px;font-weight:700">
-        <button id="send-reset-code-btn" class="btn btn-primary" style="width:auto;min-width:90px;font-size:11px">发送验证码</button>
-      </div>
-      <input id="new-password" type="password" placeholder="新密码（至少6位）" style="margin-bottom:6px">
-      <button id="reset-pwd-btn" class="btn btn-accent">重置密码</button>
-      <button id="back-to-login" class="btn btn-ghost" style="font-size:10px;margin-top:4px">← 返回登录</button>
-    </div>
   </div>
 
   <!-- 用户区 -->
@@ -264,12 +238,15 @@ input.invalid{border-color:var(--red);background:#FFF5F5}
 
   <div id="message"></div>
 
-  <!-- 服务器设置 -->
+  <!-- 高级设置（折叠） -->
   <div class="settings" style="text-align:center">
-    <label>服务器地址</label>
-    <div style="display:flex;gap:4px;margin-top:4px">
-      <input id="api-url" placeholder="https://jianla.xyz:8000" style="flex:1">
-      <button id="save-api" class="btn btn-outline" style="width:auto;min-height:26px;font-size:10px;padding:0 8px">保存</button>
+    <button id="toggle-advanced" class="btn btn-ghost" style="font-size:10px;color:#A1887F">⚙ 高级设置</button>
+    <div id="advanced-settings" style="display:none;margin-top:6px">
+      <label style="font-size:11px;color:#8D6E63">自定义服务器地址</label>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <input id="api-url" placeholder="https://jianla.xyz:8000" style="flex:1">
+        <button id="save-api" class="btn btn-outline" style="width:auto;min-height:26px;font-size:10px;padding:0 8px">保存</button>
+      </div>
     </div>
   </div>
 </div>
