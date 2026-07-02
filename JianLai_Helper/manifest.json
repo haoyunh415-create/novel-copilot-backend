@@ -4,18 +4,8 @@
   "description": "为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。",
   "version": "2.1.0",
   "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": ["http://8.134.8.50:8000/*", "http://*/*", "https://*/*"],
-  "icons": {
-    "16": "icon-16.png",
-    "48": "icon-48.png",
-    "128": "icon-128.png"
-  },
+  "host_permissions": ["https://jianla.xyz:8000/*", "http://*/*", "https://*/*"],
   "action": {
-    "default_icon": {
-      "16": "icon-16.png",
-      "48": "icon-48.png",
-      "128": "icon-128.png"
-    },
     "default_popup": "popup.html"
   },
   "content_scripts": [

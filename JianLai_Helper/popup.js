@@ -5,7 +5,7 @@ let isStarting = false;
 function getAPI() {
   return new Promise((resolve) => {
     chrome.storage.local.get(["api_url"], ({ api_url }) => {
-      resolve(api_url || "http://8.134.8.50:8000");
+      resolve(api_url || "https://jianla.xyz:8000");
     });
   });
 }

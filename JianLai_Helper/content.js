@@ -126,7 +126,7 @@
   function getAPI() {
     return new Promise((resolve) => {
       chrome.storage.local.get(["api_url"], ({ api_url }) => {
-        resolve(api_url || "http://8.134.8.50:8000");
+        resolve(api_url || "https://jianla.xyz:8000");
       });
     });
   }
@@ -335,6 +335,9 @@
         _chatBookId = _currentBookId;
         _chatHistory = [];
         loadChatHistory();
+        // 切书后清空推荐问题，强制重新生成
+        var sq = document.getElementById("jl-suggested-questions");
+        if (sq) sq.innerHTML = "";
       }
       renderChatHistory();
       // 如果还没有推荐问题，尝试生成离线推荐
@@ -552,6 +555,11 @@
           renderChatHistory();
           var oldSection = document.getElementById("jl-history-section");
           if (oldSection) oldSection.remove();
+          // 切书后清空推荐问题和记忆标签，强制重新生成
+          var qContainer = document.getElementById("jl-suggested-questions");
+          if (qContainer) qContainer.innerHTML = "";
+          var qaTag = document.getElementById("jl-qa-book-tag");
+          if (qaTag) qaTag.textContent = "";
         }
 
         // 加载分析历史（服务端数据，跨设备同步）
