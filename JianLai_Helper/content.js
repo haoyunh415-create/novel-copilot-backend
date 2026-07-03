@@ -9,6 +9,7 @@
   let _currentBookId = null;
   let _currentBookTitle = null;
   let _graphMode = "chapter";  // "chapter" | "book"
+  let _lastFailedQuestion = null;
 
   // ═══════════ 页面信息提取 ═══════════
 
@@ -1079,7 +1080,13 @@
       if (_chatHistory.length > 0 && _chatHistory[_chatHistory.length - 1].type === "a" && _chatHistory[_chatHistory.length - 1].text.indexOf("⏳") === 0) {
         _chatHistory.pop();
       }
-      addChatMessage("a", (error && error.message) || "问答失败，请稍后再试。");
+      var errMsg = (error && error.message) || "问答失败，请稍后再试。";
+      if (errMsg.indexOf("timeout") > -1 || errMsg.indexOf("超时") > -1) {
+        errMsg = "AI 响应超时，问题可能太复杂，试试换种问法。";
+      }
+      // 保存失败问题，供重试用
+      _lastFailedQuestion = question;
+      addChatMessage("a", "❌ " + errMsg + '\n\n<span style="font-size:11px;opacity:.7">点击输入框旁的 🔄 按钮可重试</span>');
     } finally {
       askBtn.disabled = false;
       askBtn.textContent = "询问已读记忆";

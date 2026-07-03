@@ -221,7 +221,7 @@ def answer_from_memory(question: str, memories: list[dict], spoiler_free: bool =
 
     payload = _call_ai([
         {"role": "user", "content": prompt},
-    ], temperature=0.2, timeout=45)
+    ], temperature=0.2, timeout=60)
 
     try:
         return payload["choices"][0]["message"]["content"].strip()
