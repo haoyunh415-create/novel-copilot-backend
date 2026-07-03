@@ -120,8 +120,8 @@ async function renderState() {
     if (me.credits <= 5) {
       lowMsg.style.display = "block";
       lowMsg.textContent = me.credits === 0
-        ? "额度已用完！每天签到免费领 5 次，现在就去刷新吧"
-        : "仅剩 " + me.credits + " 次额度，每天签到免费领 5 次";
+        ? "额度已用完！每天签到免费领 8 次，现在就去刷新吧"
+        : "仅剩 " + me.credits + " 次额度，每天签到免费领 8 次";
     } else {
       lowMsg.style.display = "none";
     }
@@ -290,7 +290,8 @@ async function startAnalyze() {
 }
 
 async function buy(plan) {
-  var token = await getToken();
+  var stored = await getToken();
+  var token = stored.token;
   if (!token) {
     showMessage("请先登录", "error");
     return;

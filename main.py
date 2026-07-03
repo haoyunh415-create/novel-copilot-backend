@@ -133,6 +133,14 @@ def _cleanup_rate_limits():
 
 user_last_request = {}
 
+# 偶尔清理 user_last_request（超过1000条则清掉30分钟前的记录）
+def _cleanup_user_last_request():
+    if len(user_last_request) > 1000:
+        now = time.time()
+        stale = [k for k, t in list(user_last_request.items()) if now - t > 1800]
+        for k in stale:
+            del user_last_request[k]
+
 # 问答缓存：{(username, question_hash, memory_hash): answer} — 同样问题+同样记忆不重复调 AI
 qa_cache = {}
 QA_CACHE_MAX = 200
@@ -152,9 +160,8 @@ def get_db():
         yield conn
         conn.commit()
     except sqlite3.OperationalError as e:
-        conn.rollback()
         if "database is locked" in str(e).lower():
-            # 数据库锁：等待重试一次
+            # 数据库锁：等待释放后重试提交
             import time as _time
             _time.sleep(0.5)
             try:
@@ -162,6 +169,8 @@ def get_db():
                 return
             except Exception:
                 conn.rollback()
+                raise
+        conn.rollback()
         raise
     except Exception:
         conn.rollback()
@@ -738,6 +747,7 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
     if now - last < 2:
         return fail("请求太频繁了，请稍后再试")
     user_last_request[user] = now
+    _cleanup_user_last_request()
 
     content_hash = text_hash(req.text)
     spoiler_free = 1 if req.spoiler_free else 0

@@ -10,12 +10,42 @@
   },
   "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": ["https://jianla.xyz:8000/*", "http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html"
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "https://*.qidian.com/*",
+        "https://*.zongheng.com/*",
+        "https://*.17k.com/*",
+        "https://*.jjwxc.net/*",
+        "https://*.qimao.com/*",
+        "https://*.fannovel.com/*",
+        "https://*.69shu.com/*",
+        "https://*.biquge.com/*",
+        "https://*.xbiquge.com/*",
+        "https://*.bxwxorg.com/*",
+        "https://*.bxwx.com/*",
+        "https://*.uukanshu.com/*",
+        "https://*.hetushu.com/*",
+        "https://*.booktxt.net/*",
+        "https://*.soxs.cc/*",
+        "https://*.trxs.cc/*",
+        "https://*.69shuba.com/*",
+        "https://*.ibiquge.net/*",
+        "https://*.biqubu.com/*",
+        "https://*.biququ.com/*",
+        "https://*.biquwo.com/*",
+        "https://*.shubao.com/*",
+        "https://*.piaotia.com/*",
+        "https://*.ptwxz.com/*",
+        "https://*.biqugex.com/*",
+        "https://*.bxwx.io/*"
+      ],
       "js": ["vis-network.min.js", "content.js"],
       "run_at": "document_idle"
     }
