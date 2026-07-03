@@ -1387,15 +1387,20 @@
       return;
     }
 
+    // 扣分确认提示
+    if (!confirm("📊 全书复盘将消耗 20 积分，生成一份包含主线梳理、人物谱系、伏笔追踪等内容的深度报告。\n\n适合章节较多的长篇书籍。如果只读了一两章，建议直接逐章分析（每章仅 1 积分）。\n\n确定要继续吗？")) {
+      return;
+    }
+
     const reportBtn = document.getElementById("jl-full-report");
     const reviewBtn = document.getElementById("jl-review");
     reportBtn.disabled = true;
-    reportBtn.textContent = "生成中...";
+    reportBtn.textContent = "生成中…";
     if (reviewBtn) reviewBtn.disabled = true;
 
     // 切换到摘要面板
     switchPanel("summary");
-    setText("#jl-summary", "正在生成全书复盘报告...\n\n这需要一些时间，已分析章节越多耗时越长，请耐心等待。");
+    setText("#jl-summary", "正在生成全书复盘报告…\n\nAI 正在逐章梳理主线、人物和伏笔，请耐心等待。");
 
     try {
       const response = await fetch(API + "/api/report/full", {

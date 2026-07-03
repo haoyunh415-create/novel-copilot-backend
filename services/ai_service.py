@@ -417,6 +417,7 @@ def suggest_questions(book_title: str, recent_analyses: list[dict]):
 
 FULL_REPORT_COST = 20  # 消耗积分
 CHUNK_SIZE = 60        # 每批处理的章节数
+LIGHT_CHAPTERS = 10    # 少于此章数用轻量报告，更快
 
 
 def generate_full_report(book_title: str, memories: list[dict]):
@@ -505,6 +506,9 @@ def _generate_chunk_summary(book_title: str, chunk_text: str,
 
 def _do_single_pass_report(book_title: str, chapters_text: str, total: int) -> str:
     """单阶段：直接从章节记忆生成完整复盘报告。"""
+    if total <= LIGHT_CHAPTERS:
+        return _call_light_report_api(book_title, chapters_text, total,
+                                      input_label="章节记忆", extra_rule="")
     return _call_report_api(book_title, chapters_text, total,
                             input_label="章节记忆", extra_rule="")
 
@@ -557,6 +561,38 @@ def _call_report_api(book_title: str, content: str, total: int,
         {"role": "system", "content": "你是一个专业的书评人和阅读复盘助手。"},
         {"role": "user", "content": prompt},
     ], temperature=0.4, timeout=120)
+    try:
+        return payload["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"报告生成失败：{payload}") from exc
+
+
+def _call_light_report_api(book_title: str, content: str, total: int,
+                           input_label: str, extra_rule: str) -> str:
+    """轻量报告（≤10章）：精简结构，更快生成。"""
+    prompt = f"""你是《{book_title}》的阅读助手。请基于以下 {input_label}，生成一份简洁的阅读复盘。
+
+覆盖章节数：{total} 章
+
+规则：
+1. 只基于给定内容，不编造
+2. 用简洁的 Markdown 格式，每条点到为止
+{extra_rule}
+
+{input_label}：
+{content}
+
+请按以下结构输出（每部分控制在 3-5 条要点）：
+
+## 📖 主线梳理
+## 🕐 关键节点
+## 👥 人物一览
+## 🔍 伏笔线索"""
+
+    payload = _call_ai([
+        {"role": "system", "content": "你是一个专业的阅读复盘助手。回答简洁有力，每条不超过两句话。"},
+        {"role": "user", "content": prompt},
+    ], temperature=0.3, timeout=60)
     try:
         return payload["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError, TypeError) as exc:

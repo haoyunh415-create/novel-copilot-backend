@@ -3,6 +3,11 @@
   "name": "鉴来助手 - 小说 AI 伏笔雷达",
   "description": "为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。",
   "version": "2.1.0",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": ["https://jianla.xyz:8000/*", "http://*/*", "https://*/*"],
   "action": {
