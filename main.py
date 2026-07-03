@@ -1632,7 +1632,7 @@ def admin_list_users(_req: Request = None, _admin=Depends(verify_admin)):
     with get_db() as conn:
         rows = conn.execute(
             """
-            SELECT u.username, u.credits, u.created_at,
+            SELECT u.username, u.email, u.credits, u.created_at,
                    (SELECT COUNT(*) FROM analyses WHERE username=u.username) as total_analyses,
                    (SELECT COUNT(*) FROM orders WHERE username=u.username AND status='fulfilled') as total_orders
             FROM users u
@@ -1834,8 +1834,8 @@ th,td{padding:8px 10px;border:1px solid #e2d9d1;text-align:left}th{background:#e
 
 <div class="card">
 <h2>用户列表</h2>
-<table><thead><tr><th>用户名</th><th>额度</th><th>分析次数</th><th>购买次数</th><th>注册时间</th></tr></thead>
-<tbody id="user-list"><tr><td colspan="5">加载中...</td></tr></tbody></table>
+<table><thead><tr><th>用户名</th><th>邮箱</th><th>额度</th><th>分析次数</th><th>购买</th><th>注册时间</th><th>操作</th></tr></thead>
+<tbody id="user-list"><tr><td colspan="7">加载中...</td></tr></tbody></table>
 </div>
 
 <script>
@@ -1887,9 +1887,11 @@ async function loadData() {
     const ul = document.getElementById("user-list");
     const users = userRes.data?.users || [];
     ul.innerHTML = users.map(u => `<tr>
-      <td>${u.username}</td><td>${u.credits} 次</td><td>${u.total_analyses}</td>
+      <td>${u.username}</td><td style="font-size:12px;color:#888">${u.email || '-'}</td>
+      <td>${u.credits} 次</td><td>${u.total_analyses}</td>
       <td>${u.total_orders}</td>
-      <td>${new Date(u.created_at*1000).toLocaleString()}</td>
+      <td style="font-size:12px">${new Date(u.created_at*1000).toLocaleString()}</td>
+      <td><button onclick="quickRecharge('${u.username}', ${u.credits})" class="secondary" style="padding:2px 8px;font-size:12px">充值</button></td>
     </tr>`).join("");
   } catch (e) {
     msg("加载失败: " + e.message, true);
@@ -1919,6 +1921,22 @@ async function recharge() {
       msg(res.data.message);
       loadData();
      } else msg(res.error || "操作失败", true);
+  } catch (e) { msg("操作失败: " + e.message, true); }
+}
+
+async function quickRecharge(username, currentCredits) {
+  const delta = prompt(`向 ${username} 充值（当前 ${currentCredits} 次）\n正数=增加，负数=减少：`, "100");
+  if (!delta) return;
+  const d = parseInt(delta, 10);
+  if (!d || isNaN(d)) { msg("请输入有效数字", true); return; }
+  if (!confirm(`确认向 ${username} ${d > 0 ? "增加" : "减少"} ${Math.abs(d)} 次额度？`)) return;
+  try {
+    const res = await fetchAPI(`/api/admin/users/${encodeURIComponent(username)}/credits`, {
+      method: "POST",
+      body: JSON.stringify({ delta: d })
+    });
+    if (res.success) { msg(res.data.message); loadData(); }
+    else msg(res.error || "操作失败", true);
   } catch (e) { msg("操作失败: " + e.message, true); }
 }
 
