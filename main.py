@@ -1685,29 +1685,43 @@ def admin_fulfill_order(order_id: int, _admin=Depends(verify_admin)):
     return ok({"message": f"已向 {order['username']} 发放 {order['credits_added']} 次额度"})
 
 
+class AdminCreditsBody(BaseModel):
+    delta: int
+
+
 @app.post("/api/admin/users/{username}/credits")
-def admin_add_credits(username: str, req: Request, _admin=Depends(verify_admin)):
-    """手动增减用户额度"""
-    body = req.json()
-    delta = int(body.get("delta", 0))
+def admin_add_credits(username: str, body: AdminCreditsBody, _admin=Depends(verify_admin)):
+    """手动增减用户额度，也支持邮箱查找"""
+    delta = body.delta
     if delta == 0:
         return fail("delta 不能为 0")
 
     with get_db() as conn:
+        # 先按用户名精确匹配
         user = conn.execute(
             "SELECT username FROM users WHERE username=?",
             (username,),
         ).fetchone()
+
+        # 找不到？试试邮箱匹配
         if not user:
-            return fail("用户不存在")
+            user = conn.execute(
+                "SELECT username FROM users WHERE email=?",
+                (username.lower().strip(),),
+            ).fetchone()
+
+        if not user:
+            return fail(f"用户不存在：{username}（可输入用户名或邮箱）")
+
+        actual_username = user["username"]
 
         conn.execute(
             "UPDATE users SET credits = MAX(0, credits + ?) WHERE username=?",
-            (delta, username),
+            (delta, actual_username),
         )
-        log_usage(conn, username, "admin_credit", f"管理员调整额度 ({delta})", delta)
+        log_usage(conn, actual_username, "admin_credit", f"管理员调整额度 ({delta})", delta)
 
-    return ok({"message": f"已调整 {username} 额度 ({delta:+d})"})
+    return ok({"message": f"已调整 {actual_username} 额度 ({delta:+d})"})
 
 
 @app.get("/pay/{order_id}")
