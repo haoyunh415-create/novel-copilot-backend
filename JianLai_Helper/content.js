@@ -1055,7 +1055,10 @@
       });
 
       var payload = await response.json();
-      if (!payload.success) throw new Error(payload.error || "问答失败");
+      if (!payload.success) {
+        var msg = payload.error || (payload.detail && JSON.stringify(payload.detail)) || "问答失败";
+        throw new Error(msg);
+      }
 
       // 替换"思考中"为真实回答
       var answerText = payload.data.answer;

@@ -330,7 +330,7 @@ class BuyRequest(BaseModel):
 
 
 class AskRequest(BaseModel):
-    question: str = Field(min_length=2, max_length=500)
+    question: str = Field(min_length=2, max_length=3000)
     source_url: Optional[str] = Field(default=None, max_length=1000)
     spoiler_free: bool = True
     book_id: Optional[int] = Field(default=None)
