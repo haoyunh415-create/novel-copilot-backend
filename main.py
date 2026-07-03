@@ -1605,8 +1605,8 @@ ADMIN_KEY = os.getenv("ADMIN_KEY", "admin_dev_key")
 
 
 def verify_admin(req: Request):
-    """简易管理员验证"""
-    key = req.headers.get("X-Admin-Key", "")
+    """简易管理员验证：Header 或 URL 参数"""
+    key = req.headers.get("X-Admin-Key", "") or req.query_params.get("admin_key", "")
     if key != ADMIN_KEY:
         raise HTTPException(status_code=403, detail="无管理权限")
 
@@ -1848,9 +1848,10 @@ function setAdminKey() {
 }
 
 async function fetchAPI(path, opts = {}) {
-  const res = await fetch(API + path, {
+  const sep = path.includes("?") ? "&" : "?";
+  const res = await fetch(API + path + sep + "admin_key=" + encodeURIComponent(adminKey), {
     ...opts,
-    headers: { ...opts.headers, "X-Admin-Key": adminKey, "Content-Type": "application/json" }
+    headers: { ...opts.headers, "Content-Type": "application/json" }
   });
   return res.json();
 }
