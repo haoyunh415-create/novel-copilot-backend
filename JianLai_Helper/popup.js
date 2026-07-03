@@ -96,6 +96,9 @@ async function renderState() {
       chrome.storage.local.remove(["token", "username"]);
       showMessage("登录已过期，请重新登录", "error");
     }
+    // 未登录显示红点
+    chrome.action.setBadgeText({ text: "!" });
+    chrome.action.setBadgeBackgroundColor({ color: "#c62828" });
     $("auth-box").style.display = "block";
     $("user-box").style.display = "none";
     return;
@@ -110,6 +113,9 @@ async function renderState() {
     creditsEl.textContent = me.credits;
     if (me.credits <= 5) creditsEl.classList.add("low");
     else creditsEl.classList.remove("low");
+
+    // 扩展角标显示剩余次数
+    updateBadge(me.credits);
 
     // 显示用户名
     $("display-username").textContent = stored.username || "用户";
@@ -368,9 +374,21 @@ async function loadApiUrl() {
   $("api-url").value = api;
 }
 
+function updateBadge(credits) {
+  var text = credits > 99 ? "99+" : String(credits);
+  var color = credits <= 0 ? "#c62828" : credits <= 5 ? "#e65100" : "#2e7d32";
+  chrome.action.setBadgeText({ text: text });
+  chrome.action.setBadgeBackgroundColor({ color: color });
+}
+
+function clearBadge() {
+  chrome.action.setBadgeText({ text: "" });
+}
+
 function logout() {
   chrome.storage.local.remove(["token", "username"], () => {
     $("user-greeting").style.display = "none";
+    clearBadge();
     showMessage("已退出登录");
     renderState();
   });

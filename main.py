@@ -74,8 +74,7 @@ SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASS)
 
-# 验证码存储（内存）：{email: {code, expires}}
-_email_codes = {}
+# 验证码存储在 email_codes 表中（SQLite，重启不丢失）
 
 # ── 请求限流 ──
 # {key: [timestamp, ...]}
@@ -278,8 +277,41 @@ def init_db():
             """
         )
 
+        # 邮箱验证码表（替代内存存储，重启不丢失）
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS email_codes (
+                email TEXT PRIMARY KEY,
+                code TEXT NOT NULL,
+                expires INTEGER NOT NULL,
+                sent_at INTEGER NOT NULL
+            )
+            """
+        )
+
+        # KV 存储（用于记录 VACUUM 时间等）
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS kv_store (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+
 
 init_db()
+
+# 每天最多一次 VACUUM，回收删除的缓存数据空间
+try:
+    with get_db() as conn:
+        row = conn.execute("SELECT value FROM kv_store WHERE key='last_vacuum'").fetchone()
+        last = int(row["value"]) if row else 0
+        if time.time() - last > 86400:
+            conn.execute("VACUUM")
+            conn.execute("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_vacuum', ?)", (str(int(time.time())),))
+except Exception:
+    pass  # VACUUM 失败不影响服务
 
 
 class AnalyzeRequest(BaseModel):
@@ -490,21 +522,23 @@ def send_code(req: SendCodeRequest, http_req: Request):
         return fail("邮箱格式不正确")
 
     # 限制发送频率（60 秒内不能重复发送）
-    existing = _email_codes.get(email)
-    if existing and time.time() - existing.get("sent_at", 0) < 60:
-        return fail("验证码已发送，请 60 秒后再试")
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT sent_at FROM email_codes WHERE email=?",
+            (email,),
+        ).fetchone()
+        if existing and time.time() - existing["sent_at"] < 60:
+            return fail("验证码已发送，请 60 秒后再试")
 
-    code = str(random.randint(100000, 999999))
-    _email_codes[email] = {
-        "code": code,
-        "expires": time.time() + 300,  # 5 分钟有效
-        "sent_at": time.time(),
-    }
+        code = str(random.randint(100000, 999999))
+        now = time.time()
+        conn.execute(
+            "INSERT OR REPLACE INTO email_codes (email, code, expires, sent_at) VALUES (?, ?, ?, ?)",
+            (email, code, now + 300, now),
+        )
 
-    # 清理过期验证码
-    expired = [e for e, v in _email_codes.items() if v["expires"] < time.time()]
-    for e in expired:
-        del _email_codes[e]
+        # 清理过期验证码
+        conn.execute("DELETE FROM email_codes WHERE expires < ?", (now,))
 
     body = f"""
     <div style="font-family:Arial,sans-serif;max-width:400px;margin:0 auto;padding:20px;
@@ -542,17 +576,22 @@ def verify_code_login(req: VerifyCodeLoginRequest, http_req: Request):
     client_ip = http_req.client.host if http_req.client else "unknown"
     email = req.email.strip().lower()
 
-    record = _email_codes.get(email)
-    if not record:
-        return fail("请先获取验证码")
-    if record["expires"] < time.time():
-        del _email_codes[email]
-        return fail("验证码已过期，请重新获取")
-    if record["code"] != req.code:
-        return fail("验证码错误")
+    with get_db() as conn:
+        record = conn.execute(
+            "SELECT code, expires FROM email_codes WHERE email=?",
+            (email,),
+        ).fetchone()
 
-    # 验证通过，清除验证码
-    del _email_codes[email]
+        if not record:
+            return fail("请先获取验证码")
+        if record["expires"] < time.time():
+            conn.execute("DELETE FROM email_codes WHERE email=?", (email,))
+            return fail("验证码已过期，请重新获取")
+        if record["code"] != req.code:
+            return fail("验证码错误")
+
+        # 验证通过，清除验证码
+        conn.execute("DELETE FROM email_codes WHERE email=?", (email,))
 
     # 从邮箱提取用户名（@ 前面的部分）
     base_username = email.split("@")[0].replace(".", "_").replace("-", "_")
@@ -629,13 +668,14 @@ def forgot_password(req: ForgotPasswordRequest):
     if not email or "@" not in email:
         return ok({"message": "该账号未绑定邮箱，请联系客服重置密码"})
 
-    # 发送验证码（复用 email login 的验证码机制）
+    # 发送验证码（存入 SQLite）
     code = str(random.randint(100000, 999999))
-    _email_codes[email] = {
-        "code": code,
-        "expires": time.time() + 300,
-        "sent_at": time.time(),
-    }
+    now = time.time()
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO email_codes (email, code, expires, sent_at) VALUES (?, ?, ?, ?)",
+            (email, code, now + 300, now),
+        )
 
     body = f"""
     <div style="font-family:Arial,sans-serif;max-width:400px;margin:0 auto;padding:20px;
@@ -682,17 +722,21 @@ def reset_password(req: ResetPasswordRequest):
         return fail("账号不存在或未绑定邮箱")
 
     email = user["email"]
-    record = _email_codes.get(email)
-    if not record:
-        return fail("请先获取验证码")
-    if record["expires"] < time.time():
-        del _email_codes[email]
-        return fail("验证码已过期")
-    if record["code"] != req.code:
-        return fail("验证码错误")
+    with get_db() as conn:
+        record = conn.execute(
+            "SELECT code, expires FROM email_codes WHERE email=?",
+            (email,),
+        ).fetchone()
+        if not record:
+            return fail("请先获取验证码")
+        if record["expires"] < time.time():
+            conn.execute("DELETE FROM email_codes WHERE email=?", (email,))
+            return fail("验证码已过期")
+        if record["code"] != req.code:
+            return fail("验证码错误")
+        conn.execute("DELETE FROM email_codes WHERE email=?", (email,))
 
     # 验证通过，重置密码
-    del _email_codes[email]
     with get_db() as conn:
         conn.execute(
             "UPDATE users SET password=? WHERE username=?",

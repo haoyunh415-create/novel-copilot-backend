@@ -150,6 +150,27 @@
     });
   }
 
+  // 自动重试 fetch（最多重试 2 次，指数退避；AbortError 不重试）
+  async function fetchWithRetry(url, options, retries) {
+    retries = retries || 2;
+    var lastError;
+    for (var i = 0; i <= retries; i++) {
+      try {
+        var resp = await fetch(url, options);
+        if (resp.ok || i === retries) return resp;
+        if (resp.status >= 500) { lastError = new Error("服务器错误(" + resp.status + ")，正在重试..."); }
+        else return resp;
+      } catch (e) {
+        if (e.name === "AbortError") throw e; // 用户取消，不重试
+        lastError = e;
+      }
+      if (i < retries) {
+        await new Promise(function (r) { return setTimeout(r, Math.pow(2, i) * 1000); });
+      }
+    }
+    throw lastError || new Error("请求失败");
+  }
+
   function setText(selector, text) {
     const node = document.querySelector(selector);
     if (node) node.textContent = text || "";
@@ -575,7 +596,7 @@
       const author = getAuthor();
       const chapterIndex = getChapterIndex();
 
-      const response = await fetch(API + "/api/analyze", {
+      const response = await fetchWithRetry(API + "/api/analyze", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -935,7 +956,7 @@
     btn.disabled = true;
     btn.textContent = "生成中...";
     try {
-      var response = await fetch(API + "/api/ask/suggest", {
+      var response = await fetchWithRetry(API + "/api/ask/suggest", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1023,7 +1044,7 @@
         body.question = "[对话历史]\n" + ctxText + "\n\n[当前问题]\n" + question;
       }
 
-      var response = await fetch(API + "/api/ask", {
+      var response = await fetchWithRetry(API + "/api/ask", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1347,7 +1368,7 @@
     setText("#jl-summary", "正在生成最近 10 章追更回顾...");
 
     try {
-      const response = await fetch(API + "/api/review", {
+      const response = await fetchWithRetry(API + "/api/review", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1373,6 +1394,8 @@
       reviewBtn.textContent = "最近回顾";
     }
   }
+
+  var _reportAbortController = null;
 
   async function fullReport() {
     const API = await getAPI();
@@ -1400,17 +1423,45 @@
 
     // 切换到摘要面板
     switchPanel("summary");
-    setText("#jl-summary", "正在生成全书复盘报告…\n\nAI 正在逐章梳理主线、人物和伏笔，请耐心等待。");
+
+    // 取消按钮
+    var cancelBtn = document.createElement("button");
+    cancelBtn.id = "jl-cancel-report";
+    cancelBtn.textContent = "取消生成";
+    cancelBtn.style.cssText = "margin:8px 0;padding:4px 16px;background:#ffebee;color:#c62828;border:1px solid #ef9a9a;border-radius:6px;cursor:pointer;font-size:12px";
+    var summaryCard = document.querySelector("#jl-panel-summary .jl-card");
+    if (summaryCard) summaryCard.prepend(cancelBtn);
+
+    // 阶段提示轮播
+    var stages = ["📖 正在梳理主线剧情…", "👥 正在分析人物关系…", "🔍 正在追踪伏笔线索…", "📝 正在生成最终报告…"];
+    var stageIdx = 0;
+    var startTime = Date.now();
+    setText("#jl-summary", stages[0] + "\n\n⏱ 已耗时 0 秒");
+    var stageTimer = setInterval(function () {
+      stageIdx = (stageIdx + 1) % stages.length;
+      var elapsed = Math.floor((Date.now() - startTime) / 1000);
+      setText("#jl-summary", stages[stageIdx] + "\n\n⏱ 已耗时 " + elapsed + " 秒");
+    }, 3000);
+
+    // AbortController 支持取消
+    _reportAbortController = new AbortController();
+    cancelBtn.addEventListener("click", function () {
+      if (_reportAbortController) _reportAbortController.abort();
+      clearInterval(stageTimer);
+    });
 
     try {
-      const response = await fetch(API + "/api/report/full", {
+      const response = await fetchWithRetry(API + "/api/report/full", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: "Bearer " + token
         },
-        body: JSON.stringify({ book_id: _currentBookId })
+        body: JSON.stringify({ book_id: _currentBookId }),
+        signal: _reportAbortController.signal
       });
+
+      clearInterval(stageTimer);
 
       const payload = await response.json();
       if (!payload.success) throw new Error(payload.error || "报告生成失败");
@@ -1445,8 +1496,15 @@
         URL.revokeObjectURL(url);
       });
     } catch (error) {
-      setText("#jl-summary", error.message || "报告生成失败，请稍后再试。");
+      clearInterval(stageTimer);
+      if (error.name === "AbortError") {
+        setText("#jl-summary", "已取消全书复盘，积分已返还。");
+      } else {
+        setText("#jl-summary", error.message || "报告生成失败，请稍后再试。");
+      }
     } finally {
+      _reportAbortController = null;
+      if (cancelBtn.parentNode) cancelBtn.remove();
       reportBtn.disabled = false;
       reportBtn.textContent = "全书复盘";
       if (reviewBtn) reviewBtn.disabled = false;
