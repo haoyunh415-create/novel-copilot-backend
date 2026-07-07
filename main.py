@@ -409,6 +409,11 @@ def get_user(req: Request):
     return username
 
 
+@app.get("/google59b898fc46d5abd2.html")
+def google_verify():
+    return HTMLResponse(content="google-site-verification: google59b898fc46d5abd2.html")
+
+
 @app.get("/")
 def root():
     return HTMLResponse(content="""
