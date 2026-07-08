@@ -1615,6 +1615,14 @@ def buy(req: BuyRequest, user=Depends(get_user)):
     # 支付功能暂未开放
     return fail("支付功能即将上线，微信支付接入中，敬请期待！")
 
+    # 恢复支付时取消下方注释，删除上面三行：
+    # plans = {
+    #     "trial":    {"credits": 50,   "name": "尝鲜包（50次）",  "amount": 4.9},
+    #     "value":    {"credits": 200,  "name": "实惠包（200次）", "amount": 12.9},
+    #     "premium":  {"credits": 500,  "name": "畅读包（500次）", "amount": 24.9},
+    #     "monthly":  {"credits": 0,    "name": "月卡（30天无限）", "amount": 19.8},
+    # }
+
 
 # ── 管理后台 ──
 
