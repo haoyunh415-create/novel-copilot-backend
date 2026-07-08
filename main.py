@@ -1612,50 +1612,8 @@ def log_usage(conn, username: str, action: str, detail: str = "", delta: int = 0
 
 @app.post("/api/buy")
 def buy(req: BuyRequest, user=Depends(get_user)):
-    plans = {
-        "basic": {"credits": 100, "name": "100 次额度包", "amount": 9.9},
-        "pro": {"credits": 300, "name": "300 次额度包", "amount": 19.9},
-        "monthly": {"credits": 0, "name": "月卡（30天无限）", "amount": 19.9},
-        "earlybird": {"credits": 2000, "name": "早鸟高级版", "amount": 49.0},
-        "lifetime": {"credits": 9999, "name": "早鸟永久版", "amount": 99.0},
-    }
-    plan = plans.get(req.plan)
-    if not plan:
-        return fail("未知套餐")
-
-    # 记录订单
-    with get_db() as conn:
-        cur = conn.execute(
-            "INSERT INTO orders (username, plan, amount, credits_added, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
-            (user, req.plan, plan["amount"], plan["credits"], int(time.time())),
-        )
-        order_id = cur.lastrowid
-
-        if MOCK_PAYMENTS_ENABLED:
-            # 开发模式直接发放
-            conn.execute(
-                "UPDATE users SET credits = credits + ? WHERE username=?",
-                (plan["credits"], user),
-            )
-            conn.execute(
-                "UPDATE orders SET status='fulfilled', fulfilled_at=? WHERE id=?",
-                (int(time.time()), order_id),
-            )
-            log_usage(conn, user, "buy", f"套餐: {plan['name']} (+{plan['credits']}次)", plan["credits"])
-            return ok({
-                "order_id": order_id,
-                "added": plan["credits"],
-                "message": f"已购买 {plan['name']}（开发模式自动发放）"
-            })
-
-    return ok(
-        {
-            "order_id": order_id,
-            "checkout_required": True,
-            "pay_url": f"/pay/{order_id}",
-            "message": f"订单已创建，请在支付页面完成转账",
-        }
-    )
+    # 支付功能暂未开放
+    return fail("支付功能即将上线，微信支付接入中，敬请期待！")
 
 
 # ── 管理后台 ──
@@ -1785,7 +1743,33 @@ def admin_add_credits(username: str, body: AdminCreditsBody, _admin=Depends(veri
 
 @app.get("/pay/{order_id}")
 def pay_page(order_id: int):
-    """支付引导页面"""
+    """支付引导页面 - 暂未开放"""
+    return HTMLResponse(content="""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>支付 - 鉴来助手</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f5f0eb; color: #3e2723; }
+  .card { text-align: center; padding: 48px 32px; background: #fff; border-radius: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.08); max-width: 400px; }
+  .icon { font-size: 48px; margin-bottom: 16px; }
+  h2 { margin: 0 0 8px; font-size: 20px; }
+  p { color: #8b7c72; font-size: 14px; margin: 0; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">🛠️</div>
+  <h2>支付功能即将上线</h2>
+  <p>微信支付接入中，敬请期待！</p>
+</div>
+</body>
+</html>""")
+
+# 以下是旧的支付页面代码，支付开放后恢复
+"""
     with get_db() as conn:
         order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
     if not order:
@@ -1796,7 +1780,7 @@ def pay_page(order_id: int):
         "monthly": "月卡（30天无限）", "earlybird": "早鸟高级版", "lifetime": "早鸟永久版",
     }
 
-    return HTMLResponse(content=f"""
+    return HTMLResponse(content=f\"""
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>

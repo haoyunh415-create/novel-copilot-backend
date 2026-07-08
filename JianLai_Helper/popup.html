@@ -122,13 +122,14 @@ input.invalid{border-color:var(--red);background:#FFF5F5}
 .buy-plan-btn.selected{border-color:var(--gold);background:#FFF3E0;box-shadow:0 0 0 2px rgba(199,91,57,.15)}
 .buy-plan-btn .price{font-size:10px;color:var(--brown-light);font-weight:400}
 
-/* Buy result */
-.buy-result-card{
-  padding:12px;border-radius:8px;font-size:11px;line-height:1.7;
+/* Buy coming soon */
+.buy-coming-soon{
+  text-align:center;padding:20px 12px;border:1.5px dashed var(--border);
+  border-radius:10px;background:#FAFAFA;margin:4px 0 8px;
 }
-.buy-result-card.success{background:#E8F5E9;border:1px solid #C8E6C9;color:#2E7D32}
-.buy-result-card.pending{background:#E3F2FD;border:1px solid #BBDEFB;color:#1565C0}
-.buy-result-card .amount{font-size:20px;font-weight:800;margin:2px 0}
+.coming-soon-icon{font-size:28px;margin-bottom:8px}
+.coming-soon-text{font-size:14px;font-weight:700;color:var(--ink)}
+.coming-soon-sub{font-size:11px;color:var(--brown-light);margin-top:4px}
 
 /* Message */
 #message{
@@ -214,23 +215,13 @@ input.invalid{border-color:var(--red);background:#FFF5F5}
       <span>✦</span> 分析当前章节
     </button>
 
-    <!-- 购买 -->
+    <!-- 购买（暂未开放） -->
     <div class="sep-text">💎 购买更多额度</div>
-    <div class="buy-grid">
-      <button class="buy-plan-btn" data-plan="basic">
-        <span>100 次</span><span class="price">¥9.9</span>
-      </button>
-      <button class="buy-plan-btn" data-plan="pro">
-        <span>300 次</span><span class="price">¥19.9</span>
-      </button>
-      <button class="buy-plan-btn" data-plan="monthly">
-        <span>月卡无限</span><span class="price">¥19.9</span>
-      </button>
-      <button class="buy-plan-btn" data-plan="lifetime">
-        <span>永久版</span><span class="price">¥99</span>
-      </button>
+    <div class="buy-coming-soon">
+      <div class="coming-soon-icon">🛠️</div>
+      <div class="coming-soon-text">支付功能即将上线</div>
+      <div class="coming-soon-sub">微信支付接入中，敬请期待</div>
     </div>
-    <div id="buy-result" style="display:none"></div>
 
     <!-- 底部操作 -->
     <button id="logout" class="btn btn-ghost">退出登录</button>

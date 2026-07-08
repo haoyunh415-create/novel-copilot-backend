@@ -296,65 +296,8 @@ async function startAnalyze() {
 }
 
 async function buy(plan) {
-  var stored = await getToken();
-  var token = stored.token;
-  if (!token) {
-    showMessage("请先登录", "error");
-    return;
-  }
-
-  var planInfo = {
-    basic:   { name: "100 次额度包", amount: "9.9", credits: 100 },
-    pro:     { name: "300 次额度包", amount: "19.9", credits: 300 },
-    monthly: { name: "月卡（30天无限）", amount: "19.9", credits: 0 },
-    earlybird: { name: "早鸟高级版", amount: "49.0", credits: 2000 },
-    lifetime: { name: "早鸟永久版", amount: "99.0", credits: 9999 },
-  };
-  var info = planInfo[plan] || { name: plan, amount: "?", credits: 0 };
-
-  // 高亮选中按钮
-  document.querySelectorAll(".buy-plan-btn").forEach(function (b) {
-    b.classList.toggle("selected", b.dataset.plan === plan);
-  });
-
-  showMessage("正在处理...");
-
-  try {
-    var data = await apiFetch("/api/buy", {
-      method: "POST",
-      headers: { Authorization: "Bearer " + token },
-      body: JSON.stringify({ plan: plan })
-    });
-
-    var resultDiv = $("buy-result");
-    resultDiv.style.display = "block";
-
-    if (data.added) {
-      // Mock 模式：直接到账
-      resultDiv.innerHTML =
-        '<div class="buy-result-card success">' +
-          '<div class="big">✅ 购买成功！</div>' +
-          '<div>' + info.name + ' · ¥' + info.amount + '</div>' +
-          '<div>额度已到账：<b>+' + data.added + ' 次</b></div>' +
-        '</div>';
-      showMessage("", "");
-    } else {
-      // 真实支付模式
-      var apiBase = await getAPI();
-      var payUrl = apiBase + (data.pay_url || "/pay/" + (data.order_id || ""));
-      resultDiv.innerHTML =
-        '<div class="buy-result-card pending">' +
-          '<div class="big">📦 ' + info.name + '</div>' +
-          '<div style="margin:4px 0">金额：<b>¥' + info.amount + '</b></div>' +
-          '<a href="' + payUrl + '" target="_blank" style="display:block;margin:8px 0;padding:8px;border-radius:6px;background:#fff;color:#1565C0;text-align:center;text-decoration:none;font-weight:600;font-size:12px;border:1px solid #BBDEFB">📱 打开支付页面</a>' +
-          '<div style="font-size:10px;color:#6D6D6D">支付完成后联系客服确认到账</div>' +
-          '<div style="margin-top:4px;font-size:10px;opacity:.6">订单号：#' + (data.order_id || "?") + '</div>' +
-        '</div>';
-    }
-    renderState();
-  } catch (error) {
-    showMessage(error.message, "error");
-  }
+  // 支付功能暂未开放
+  showMessage("💳 微信支付接入中，敬请期待！", "info");
 }
 
 async function saveApiUrl() {
