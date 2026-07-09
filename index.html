@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>鉴来助手 — 追更不迷路的 AI 阅读助手</title>
-<meta name="description" content="浏览器插件，AI 自动追踪伏笔、生成人物关系图、无剧透前情提要。长篇追更党必备。">
+<meta name="description" content="浏览器插件，AI 自动追踪伏笔、生成人物关系图、无剧透前情提要。长篇追更党必备。支持 Chrome / Edge / 搜狗等浏览器，直接下载免梯子。">
 <style>
 /* ═══════ Reset ═══════ */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -309,7 +309,7 @@ footer a:hover{color:var(--vermillion)}
 <!-- ═══════ Hero ═══════ -->
 <section class="hero">
   <div class="container">
-    <div class="hero-badge reveal"><span class="dot"></span>Chrome 扩展 · 审核中，即将上线</div>
+    <div class="hero-badge reveal"><span class="dot"></span>Chrome 扩展 · 已上线 Chrome 商店</div>
     <h1 class="reveal d1">
       追更<em>不迷路</em>的<br>AI 阅读助手
     </h1>
@@ -319,9 +319,11 @@ footer a:hover{color:var(--vermillion)}
     </p>
     <div class="hero-actions reveal d3">
       <a href="https://chromewebstore.google.com/detail/%E9%89%B4%E6%9D%A5%E5%8A%A9%E6%89%8B-%E5%B0%8F%E8%AF%B4-ai-%E4%BC%8F%E7%AC%94%E9%9B%B7%E8%BE%BE/ahahdepghanijblcddabfpeipbclobil" class="btn btn-primary" target="_blank" rel="noopener">
-        🚀 从 Chrome 商店安装
+        🌐 Chrome 商店安装
       </a>
-      <a href="#install" class="btn btn-outline">自己部署也能用</a>
+      <a href="#download" class="btn btn-outline" style="border-color:var(--vermillion);color:var(--vermillion)">
+        📦 国内下载（免梯子）
+      </a>
     </div>
     <div class="hero-scroll reveal d4">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
@@ -398,54 +400,61 @@ footer a:hover{color:var(--vermillion)}
   </div>
 </section>
 
-<!-- ═══════ Steps ═══════ -->
-<section class="steps" id="install">
+<!-- ═══════ Download ═══════ -->
+<section class="steps" id="download">
   <div class="container">
-    <p class="section-label reveal">两种方式</p>
-    <h2 class="section-title reveal d1">现在就能用</h2>
+    <p class="section-label reveal">安装指南</p>
+    <h2 class="section-title reveal d1">两种安装方式，国内也能用</h2>
 
-    <!-- 托管版 -->
-    <div style="text-align:center;margin-bottom:36px;padding:20px 24px;background:rgba(46,125,50,.06);border:1px solid rgba(46,125,50,.18);border-radius:14px" class="reveal d1">
-      <p style="font-size:.9rem;color:#2E7D32;font-weight:600;margin-bottom:4px">✅ 已提交 Chrome Web Store 审核（推荐）</p>
-      <p style="font-size:.8rem;color:var(--brown-mid)">通过后即可在 Chrome 商店一键安装 · 无需配置 · 注册即用</p>
-      <p style="font-size:.72rem;color:var(--brown-light);margin-top:6px">审核中，预计 1-3 个工作日通过</p>
+    <!-- 方式一：直接下载 -->
+    <div style="text-align:center;margin-bottom:28px;padding:28px 24px;background:rgba(199,91,57,.04);border:2px solid rgba(199,91,57,.18);border-radius:14px" class="reveal d1">
+      <p style="font-size:1rem;color:var(--vermillion);font-weight:700;margin-bottom:6px">📦 方式一：直接下载安装（推荐国内用户）</p>
+      <p style="font-size:.82rem;color:var(--brown-mid);margin-bottom:16px">下载 ZIP 包，拖进浏览器即可，无需梯子，Chrome / Edge / 搜狗 / QQ浏览器通用</p>
+      <a href="/static/jianlai-helper-v2.1.1.zip" class="btn btn-primary" style="display:inline-flex;font-size:.95rem;padding:14px 36px">
+        ⬇ 下载插件（167KB）
+      </a>
     </div>
-
-    <p style="text-align:center;font-size:.76rem;color:var(--brown-light);margin-bottom:28px" class="reveal d2">等不及审核？可以先自己部署：</p>
 
     <div class="steps-grid">
       <div class="step-card reveal d2">
         <div class="step-num">1</div>
-        <h3>下载项目</h3>
-        <p>从 GitHub 下载最新版本，解压到任意文件夹。</p>
-        <p style="margin-top:8px;font-size:.7rem;color:var(--vermillion)">github.com/haoyunh415-create</p>
+        <h3>下载 ZIP 包</h3>
+        <p>点击上方按钮下载插件压缩包，<strong>不需要解压</strong>。</p>
         <span class="step-arrow">→</span>
       </div>
       <div class="step-card reveal d3">
         <div class="step-num">2</div>
-        <h3>启动后端</h3>
-        <p>安装 Python 依赖，配置 DeepSeek API Key，运行 <code>python main.py</code>。</p>
+        <h3>打开扩展管理</h3>
+        <p>浏览器地址栏输入 <code>chrome://extensions</code>（Edge 用 <code>edge://extensions</code>），开启右上角<strong>开发者模式</strong>。</p>
         <span class="step-arrow">→</span>
       </div>
       <div class="step-card reveal d4">
         <div class="step-num">3</div>
-        <h3>加载插件</h3>
-        <p>Chrome 扩展管理 → 开发者模式 → 加载已解压的扩展程序 → 选择 <code>JianLai_Helper</code> 文件夹，完成！</p>
+        <h3>拖入安装</h3>
+        <p>把下载的 <code>.zip</code> 文件直接拖进浏览器扩展管理页面，确认安装即完成！</p>
       </div>
     </div>
-    <p class="steps-note">📖 详细步骤见 GitHub 仓库 README · 成本约 ¥0.001/次分析</p>
+
+    <!-- 方式二：Chrome 商店 -->
+    <div style="text-align:center;margin-top:40px;padding:20px 24px;background:rgba(46,125,50,.04);border:1px solid rgba(46,125,50,.14);border-radius:14px" class="reveal d1">
+      <p style="font-size:.9rem;color:#2E7D32;font-weight:600;margin-bottom:4px">🌐 方式二：Chrome Web Store 安装（需梯子）</p>
+      <p style="font-size:.8rem;color:var(--brown-mid)">能上 Google 的用户可直接从商店一键安装，自动更新</p>
+      <a href="https://chromewebstore.google.com/detail/%E9%89%B4%E6%9D%A5%E5%8A%A9%E6%89%8B-%E5%B0%8F%E8%AF%B4-ai-%E4%BC%8F%E7%AC%94%E9%9B%B7%E8%BE%BE/ahahdepghanijblcddabfpeipbclobil" target="_blank" rel="noopener" style="display:inline-block;margin-top:10px;color:var(--brown-dark);font-weight:600;text-decoration:underline;font-size:.82rem">打开 Chrome 商店页面 →</a>
+    </div>
+
+    <p class="steps-note">安装后点工具栏图标登录（邮箱验证码）即可开始使用 · 注册送 10 次免费额度</p>
   </div>
 </section>
 
 <!-- ═══════ CTA ═══════ -->
 <section class="cta-section">
   <div class="container">
-    <h2 class="reveal">审核通过后，即可在 Chrome 商店安装</h2>
-    <p class="cta-sub reveal d1">现在可以先收藏 GitHub，获取上线通知</p>
-    <a href="https://github.com/haoyunh415-create/novel-copilot-backend" class="btn btn-primary reveal d2" target="_blank" rel="noopener">
-      ⭐ 关注 GitHub 仓库
+    <h2 class="reveal">追更党，试试让 AI 替你记住一切</h2>
+    <p class="cta-sub reveal d1">安装只需 1 分钟，注册即送 10 次免费分析额度</p>
+    <a href="#download" class="btn btn-primary reveal d2">
+      ⬇ 立即下载安装
     </a>
-    <p class="cta-hint">支持 Chrome / Edge / Brave 等 Chromium 内核浏览器</p>
+    <p class="cta-hint">支持 Chrome / Edge / Brave / 搜狗 / QQ 浏览器等 Chromium 内核浏览器</p>
   </div>
 </section>
 

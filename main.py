@@ -15,7 +15,7 @@ import jwt
 import requests as http_requests
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel, Field
 
 from services.ai_service import analyze_text
@@ -426,6 +426,16 @@ def get_user(req: Request):
 @app.get("/google59b898fc46d5abd2.html")
 def google_verify():
     return HTMLResponse(content="google-site-verification: google59b898fc46d5abd2.html")
+
+
+@app.get("/static/{filename:path}")
+def serve_static(filename: str):
+    """提供静态文件下载（插件 ZIP 等）"""
+    import os as _os
+    file_path = _os.path.join(_os.path.dirname(__file__), filename)
+    if not _os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(file_path, filename=filename)
 
 
 @app.get("/")
