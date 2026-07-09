@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import json
 import os
 import random
@@ -289,6 +289,20 @@ def init_db():
             """
         )
 
+        # 邮件发送日志
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS email_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                to_email TEXT NOT NULL,
+                subject TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'sent',
+                error TEXT DEFAULT '',
+                created_at INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+
         # KV 存储（用于记录 VACUUM 时间等）
         conn.execute(
             """
@@ -488,8 +502,9 @@ async def track_visit(req: Request):
 # ── 邮箱验证码登录（唯一登录方式）──
 
 def _send_email(to_email: str, subject: str, body: str):
-    """通过 QQ 邮箱 SMTP 发送邮件。返回 (success, message)。"""
+    """通过 QQ 邮箱 SMTP 发送邮件，并记录日志。返回 (success, message)。"""
     if not EMAIL_ENABLED:
+        _log_email(to_email, subject, "disabled", "邮件服务未配置")
         return False, "邮件服务未配置（请设置 SMTP_USER 和 SMTP_PASS）"
 
     msg = MIMEMultipart()
@@ -502,11 +517,28 @@ def _send_email(to_email: str, subject: str, body: str):
         with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
             server.login(SMTP_USER, SMTP_PASS)
             server.sendmail(SMTP_USER, [to_email], msg.as_string())
+        _log_email(to_email, subject, "sent", "")
         return True, "发送成功"
     except smtplib.SMTPAuthenticationError:
+        _log_email(to_email, subject, "auth_error", "SMTP 认证失败")
         return False, "邮件服务认证失败，请检查 SMTP 配置"
     except smtplib.SMTPException as e:
+        _log_email(to_email, subject, "error", str(e))
         return False, f"邮件发送失败：{e}"
+
+
+def _log_email(to_email: str, subject: str, status: str, error: str = ""):
+    """写入邮件发送日志（异步不阻塞，写入失败静默忽略）"""
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO email_logs (to_email, subject, status, error, created_at) VALUES (?, ?, ?, ?, ?)",
+                (to_email, subject, status, str(error)[:500], int(time.time())),
+            )
+            # 只保留最近 5000 条
+            conn.execute("DELETE FROM email_logs WHERE id NOT IN (SELECT id FROM email_logs ORDER BY id DESC LIMIT 5000)")
+    except Exception:
+        pass  # 日志写入失败不影响主流程
 
 
 class SendCodeRequest(BaseModel):
@@ -1683,6 +1715,32 @@ def admin_list_orders(status: str = None, _admin=Depends(verify_admin)):
     return ok({"orders": [dict(row) for row in rows]})
 
 
+@app.get("/api/admin/email-logs")
+def admin_email_logs(limit: int = 50, status: str = None, _admin=Depends(verify_admin)):
+    """查看邮件发送日志，可按状态过滤（sent/error/auth_error/disabled）"""
+    with get_db() as conn:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM email_logs WHERE status=? ORDER BY created_at DESC LIMIT ?",
+                (status, min(limit, 500)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM email_logs ORDER BY created_at DESC LIMIT ?",
+                (min(limit, 500),),
+            ).fetchall()
+
+        # 统计各状态数量
+        stats = conn.execute(
+            "SELECT status, COUNT(*) as cnt FROM email_logs GROUP BY status"
+        ).fetchall()
+
+    return ok({
+        "logs": [dict(row) for row in rows],
+        "stats": {row["status"]: row["cnt"] for row in stats},
+    })
+
+
 @app.post("/api/admin/orders/{order_id}/fulfill")
 def admin_fulfill_order(order_id: int, _admin=Depends(verify_admin)):
     """手动发放订单额度"""
@@ -1777,67 +1835,14 @@ def pay_page(order_id: int):
 </html>""")
 
 # 以下是旧的支付页面代码，支付开放后恢复
-"""
-    with get_db() as conn:
-        order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
-    if not order:
-        return HTMLResponse(content="<h2>订单不存在</h2>", status_code=404)
-
-    plans_display = {
-        "basic": "100 次额度包", "pro": "300 次额度包",
-        "monthly": "月卡（30天无限）", "earlybird": "早鸟高级版", "lifetime": "早鸟永久版",
-    }
-
-    return HTMLResponse(content=f\"""
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>支付 - 鉴来助手</title>
-<style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:#2C2416;background:linear-gradient(180deg,#FBF8F0,#F5EDE0);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}}
-.card{{max-width:420px;width:100%;padding:28px 24px;background:#FFFDF7;border:1px solid #E8DDD2;border-radius:12px;box-shadow:0 4px 24px rgba(44,36,22,.1);text-align:center}}
-h2{{font-size:20px;color:#5D4037;margin-bottom:4px}}
-.order-id{{font-size:12px;color:#A1887F;margin-bottom:20px}}
-.amount{{font-size:36px;font-weight:800;color:#5D4037;margin:16px 0}}
-.plan-name{{font-size:14px;color:#8D6E63}}
-.pay-section{{margin:20px 0;padding:16px;background:#FFF8E1;border:1px solid #FFE082;border-radius:10px;text-align:left}}
-.pay-section h3{{font-size:14px;color:#E65100;margin-bottom:12px}}
-.pay-section .step{{font-size:13px;color:#5D4037;margin:8px 0;line-height:1.6}}
-.qr-placeholder{{width:180px;height:180px;margin:16px auto;border:2px dashed #D7CCC8;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#A1887F;font-size:13px}}
-.note{{font-size:11px;color:#A1887F;margin-top:16px}}
-</style>
-</head>
-<body>
-<div class="card">
-  <h2>📖 鉴来助手</h2>
-  <div class="order-id">订单号 #{order["id"]}</div>
-  <div class="plan-name">{plans_display.get(order["plan"], order["plan"])}</div>
-  <div class="amount">¥{order["amount"]}</div>
-
-  <div class="pay-section">
-    <h3>📱 扫码支付</h3>
-    <div class="qr-placeholder">
-      ⚙️ 请配置<br>支付二维码
-    </div>
-    <div class="step">1️⃣ 使用微信/支付宝扫描上方二维码</div>
-    <div class="step">2️⃣ 转账 <b>¥{order["amount"]}</b></div>
-    <div class="step">3️⃣ 在转账备注中填写：<b>{order["username"]}</b></div>
-    <div class="step">4️⃣ 支付完成后联系客服确认，或等待自动到账</div>
-  </div>
-
-  <div class="note">
-    当前状态：<b style="color:#E65100">{"已到账" if order["status"] == "fulfilled" else "待支付"}</b>
-    <br>如有疑问，请在插件弹窗中联系客服
-  </div>
-</div>
-</body>
-</html>
-""")
-
-
+# （旧代码已从文件中移除，需要时从 git 历史或 Chrome商店上架清单.md 恢复）
+#
+# 支付功能恢复时参考 plans:
+#   "trial":   {"credits": 50,  "name": "尝鲜包（50次）",  "amount": 4.9},
+#   "value":   {"credits": 200, "name": "实惠包（200次）", "amount": 12.9},
+#   "premium": {"credits": 500, "name": "畅读包（500次）", "amount": 24.9},
+#   "monthly": {"credits": 0,   "name": "月卡（30天无限）", "amount": 19.8},
+#
 @app.get("/privacy")
 def privacy_page():
     """隐私政策页面"""

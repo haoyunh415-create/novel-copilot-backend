@@ -45,6 +45,10 @@ echo "[5/6] 配置环境变量..."
 if [ ! -f "$APP_DIR/.env" ]; then
     echo "  请输入 DeepSeek API Key（在 platform.deepseek.com 获取）:"
     read -r DEEPSEEK_API_KEY
+    echo "  请输入 QQ 邮箱地址（用于发送验证码，如 123456789@qq.com）:"
+    read -r SMTP_USER
+    echo "  请输入 QQ 邮箱授权码（在 QQ邮箱→设置→账户→POP3/SMTP 中生成，不是QQ密码）:"
+    read -r SMTP_PASS
     cat > "$APP_DIR/.env" << EOF
 DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY
 DEEPSEEK_API_URL=https://api.deepseek.com/v1/chat/completions
@@ -53,6 +57,10 @@ SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 ACCESS_TOKEN_TTL_SECONDS=86400
 MOCK_PAYMENTS_ENABLED=false
 ADMIN_KEY=$(python3 -c "import secrets; print(secrets.token_hex(12))")
+SMTP_HOST=smtp.qq.com
+SMTP_PORT=465
+SMTP_USER=$SMTP_USER
+SMTP_PASS=$SMTP_PASS
 EOF
     echo "  .env 已生成"
 else
@@ -70,6 +78,7 @@ After=network.target
 Type=simple
 User=$APP_USER
 WorkingDirectory=$APP_DIR
+EnvironmentFile=$APP_DIR/.env
 Environment=PATH=$APP_DIR/venv/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=$APP_DIR/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
 Restart=always
