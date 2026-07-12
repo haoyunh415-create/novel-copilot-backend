@@ -74,8 +74,51 @@ async function apiFetch(path, options = {}) {
 
 function getToken() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["token", "username"], ({ token, username }) => resolve({ token, username }));
+    chrome.storage.local.get(["token", "refreshToken", "username"], ({ token, refreshToken, username }) => resolve({ token, refreshToken, username }));
   });
+}
+
+var _refreshPromise = null;
+
+async function refreshAccessToken() {
+  var stored = await getToken();
+  var refreshToken = stored.refreshToken;
+  if (!refreshToken) return null;
+
+  // 防止并发刷新：多个调用共享同一个请求
+  if (_refreshPromise) return _refreshPromise;
+  _refreshPromise = (async () => {
+    try {
+      var api = await getAPI();
+      var resp = await fetch(api + "/api/auth/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken })
+      });
+      if (!resp.ok) {
+        if (resp.status === 401) {
+          chrome.storage.local.remove(["token", "refreshToken", "username"]);
+        }
+        return null;
+      }
+      var data = await resp.json();
+      if (!data.data || !data.data.token) return null;
+      await new Promise((resolve) => {
+        chrome.storage.local.set({
+          token: data.data.token,
+          refreshToken: data.data.refresh_token,
+          username: data.data.username
+        }, resolve);
+      });
+      return data.data.token;
+    } catch (_) {
+      // 网络错误不清除状态，下次重试
+      return null;
+    } finally {
+      _refreshPromise = null;
+    }
+  })();
+  return _refreshPromise;
 }
 
 function isTokenExpired(token) {
@@ -91,9 +134,20 @@ async function renderState() {
   var stored = await getToken();
   var token = stored.token;
 
+  // 如果 access_token 过期，尝试静默刷新
+  if (!token && stored.refreshToken) {
+    showMessage("正在恢复登录...");
+    token = await refreshAccessToken();
+    if (token) {
+      showMessage("已恢复登录", "success");
+    }
+  }
+
   if (!token || isTokenExpired(token)) {
     if (token) {
-      chrome.storage.local.remove(["token", "username"]);
+      chrome.storage.local.remove(["token", "refreshToken", "username"]);
+    }
+    if (stored.refreshToken) {
       showMessage("登录已过期，请重新登录", "error");
     }
     // 未登录显示红点
@@ -102,6 +156,18 @@ async function renderState() {
     $("auth-box").style.display = "block";
     $("user-box").style.display = "none";
     return;
+  }
+
+  // token 5 分钟内过期时主动刷新
+  if (token && stored.refreshToken) {
+    try {
+      var payload = JSON.parse(atob(token.split(".")[1]));
+      var expiresIn = (payload.exp || 0) * 1000 - Date.now();
+      if (expiresIn < 300000) {
+        var newToken = await refreshAccessToken();
+        if (newToken) token = newToken;
+      }
+    } catch (_) {}
   }
 
   try {
@@ -139,7 +205,7 @@ async function renderState() {
     $("user-box").style.display = "block";
     showMessage("");
   } catch (error) {
-    chrome.storage.local.remove(["token"]);
+    chrome.storage.local.remove(["token", "refreshToken", "username"]);
     $("auth-box").style.display = "block";
     $("user-box").style.display = "none";
     showMessage(error.message);
@@ -218,6 +284,7 @@ async function emailLogin() {
 
     chrome.storage.local.set({
       token: data.token,
+      refreshToken: data.refresh_token,
       username: data.username
     }, function () {
       showMessage(data.is_new ? "欢迎注册！已领取 10 次额度" : "登录成功", "success");
@@ -328,8 +395,23 @@ function clearBadge() {
   chrome.action.setBadgeText({ text: "" });
 }
 
-function logout() {
-  chrome.storage.local.remove(["token", "username"], () => {
+async function logout() {
+  var stored = await getToken();
+  // 通知服务端作废 refresh_token（fire-and-forget）
+  if (stored.refreshToken && stored.token) {
+    try {
+      var api = await getAPI();
+      fetch(api + "/api/auth/logout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + stored.token
+        },
+        body: JSON.stringify({ refresh_token: stored.refreshToken })
+      });
+    } catch (_) {}
+  }
+  chrome.storage.local.remove(["token", "refreshToken", "username"], () => {
     $("user-greeting").style.display = "none";
     clearBadge();
     showMessage("已退出登录");
