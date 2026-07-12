@@ -2,6 +2,7 @@
 import json
 import os
 import random
+import secrets
 import re
 import smtplib
 import sqlite3
@@ -65,6 +66,7 @@ app.add_middleware(
 
 SECRET_KEY = os.getenv("SECRET_KEY", "dev_only_change_me")
 ACCESS_TOKEN_TTL_SECONDS = int(os.getenv("ACCESS_TOKEN_TTL_SECONDS", "86400"))
+REFRESH_TOKEN_TTL_SECONDS = int(os.getenv("REFRESH_TOKEN_TTL_SECONDS", "2592000"))
 MOCK_PAYMENTS_ENABLED = os.getenv("MOCK_PAYMENTS_ENABLED", "false").lower() == "true"
 
 # ── 邮件配置 ──
@@ -82,6 +84,7 @@ _rate_limits = {}
 RATE_LIMITS = {
     "analyze": {"per_user": 20, "window": 60},       # 每用户每分钟最多20次分析
     "ask": {"per_user": 10, "window": 60},            # 每用户每分钟最多10次问答
+    "refresh": {"per_ip": 10, "window": 60},            # 每IP每分钟最多10次刷新
     "send_code": {"per_ip": 3, "window": 300},         # 每IP每5分钟最多3次发验证码
     "verify_code": {"per_ip": 10, "window": 300},      # 每IP每5分钟最多10次验证
     "register": {"per_ip": 5, "window": 3600},          # 每IP每小时最多5次注册
@@ -298,6 +301,19 @@ def init_db():
                 subject TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'sent',
                 error TEXT DEFAULT '',
+                created_at INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+
+        # Refresh Token 表（记住登录状态，30 天有效）
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token TEXT UNIQUE NOT NULL,
+                username TEXT NOT NULL,
+                expires INTEGER NOT NULL,
                 created_at INTEGER NOT NULL DEFAULT 0
             )
             """
