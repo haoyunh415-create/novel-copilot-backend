@@ -133,11 +133,53 @@
     });
   }
 
+  var _refreshPromise = null;
+
+  async function refreshAccessToken() {
+    return new Promise(async (resolve) => {
+      chrome.storage.local.get(["refreshToken"], async ({ refreshToken }) => {
+        if (!refreshToken) { resolve(null); return; }
+
+        if (_refreshPromise) { resolve(await _refreshPromise); return; }
+        _refreshPromise = (async () => {
+          try {
+            var api = await getAPI();
+            var resp = await fetch(api + "/api/auth/refresh", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ refresh_token: refreshToken })
+            });
+            if (!resp.ok) {
+              if (resp.status === 401) {
+                chrome.storage.local.remove(["token", "refreshToken", "username"]);
+              }
+              return null;
+            }
+            var data = await resp.json();
+            if (!data.data || !data.data.token) return null;
+            await new Promise((r) => {
+              chrome.storage.local.set({
+                token: data.data.token,
+                refreshToken: data.data.refresh_token,
+                username: data.data.username
+              }, r);
+            });
+            return data.data.token;
+          } catch (_) { return null; }
+          finally { _refreshPromise = null; }
+        })();
+        resolve(await _refreshPromise);
+      });
+    });
+  }
+
   function getToken() {
     return new Promise((resolve) => {
-      chrome.storage.local.get(["token"], function (result) {
+      chrome.storage.local.get(["token", "refreshToken"], async function (result) {
         var token = result.token;
-        // 检测过期
+        var refreshToken = result.refreshToken;
+
+        // 检测 access_token 是否过期
         if (token) {
           try {
             var payload = JSON.parse(atob(token.split(".")[1]));
@@ -146,6 +188,12 @@
             }
           } catch (_) { token = null; }
         }
+
+        // 过期但有 refreshToken → 尝试静默刷新
+        if (!token && refreshToken) {
+          token = await refreshAccessToken();
+        }
+
         resolve(token);
       });
     });
