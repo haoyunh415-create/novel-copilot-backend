@@ -665,12 +665,86 @@ def verify_code_login(req: VerifyCodeLoginRequest, http_req: Request):
             (username,),
         ).fetchone()["credits"]
 
+        # 生成 refresh_token（随机串，30 天有效）
+        refresh_token = secrets.token_hex(32)
+        now = int(time.time())
+        conn.execute(
+            "INSERT INTO refresh_tokens (token, username, expires, created_at) VALUES (?, ?, ?, ?)",
+            (refresh_token, username, now + REFRESH_TOKEN_TTL_SECONDS, now),
+        )
+
     return ok({
         "token": token,
+        "refresh_token": refresh_token,
         "username": username,
         "credits": credits,
         "is_new": not bool(existing),
     })
+
+
+# ── Refresh Token ──
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=64, max_length=64)
+
+
+@app.post("/api/auth/refresh")
+def refresh_token(req: RefreshRequest, http_req: Request):
+    """用 refresh_token 换取新的 access_token + refresh_token（轮转）"""
+    client_ip = http_req.client.host if http_req.client else "unknown"
+
+    # 限流
+    allowed, retry = _check_rate_limit("refresh", ip=client_ip)
+    if not allowed:
+        return fail(f"请求太频繁，请 {retry} 秒后再试")
+
+    with get_db() as conn:
+        # 顺便清理过期 token
+        conn.execute("DELETE FROM refresh_tokens WHERE expires < ?", (time.time(),))
+
+        record = conn.execute(
+            "SELECT username, expires FROM refresh_tokens WHERE token=?",
+            (req.refresh_token,),
+        ).fetchone()
+
+        if not record:
+            raise HTTPException(status_code=401, detail="请重新登录")
+
+        if record["expires"] < time.time():
+            conn.execute("DELETE FROM refresh_tokens WHERE token=?", (req.refresh_token,))
+            raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
+
+        username = record["username"]
+
+        # Token 轮转：删除旧 token，生成新 token 对
+        conn.execute("DELETE FROM refresh_tokens WHERE token=?", (req.refresh_token,))
+
+        new_refresh_token = secrets.token_hex(32)
+        now = int(time.time())
+        conn.execute(
+            "INSERT INTO refresh_tokens (token, username, expires, created_at) VALUES (?, ?, ?, ?)",
+            (new_refresh_token, username, now + REFRESH_TOKEN_TTL_SECONDS, now),
+        )
+
+    new_access_token = create_token(username)
+
+    return ok({
+        "token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "username": username,
+    })
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str = Field(min_length=64, max_length=64)
+
+
+@app.post("/api/auth/logout")
+def logout(req: LogoutRequest, user=Depends(get_user)):
+    """退出登录：作废 refresh_token"""
+    with get_db() as conn:
+        conn.execute("DELETE FROM refresh_tokens WHERE token=?", (req.refresh_token,))
+    return ok({"message": "已退出登录"})
 
 
 # ── 密码找回 ──
