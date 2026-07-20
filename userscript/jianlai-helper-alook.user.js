@@ -130,8 +130,76 @@
     return null;
   }
 
+
+  // 按章节边界提取正文（解决移动端一页多章拼接问题）
+  function extractByChapterBoundary() {
+    // 找页面中的章节标题（h1 或 h2 中包含"第X章"模式）
+    var headings = document.querySelectorAll("h1, h2");
+    var chapterPattern = /第[0-9零一二三四五六七八九百千]+[章节回]/;
+    var startEl = null;
+    
+    // 找到第一个匹配的章节标题作为起点
+    for (var i = 0; i < headings.length; i++) {
+      if (chapterPattern.test(headings[i].textContent.trim())) {
+        startEl = headings[i];
+        break;
+      }
+    }
+    if (!startEl) return "";
+    
+    // 收集起点到下一个章节标题之间的文本
+    var texts = [];
+    var el = startEl.nextElementSibling;
+    while (el) {
+      // 遇到下一个章节标题就停止
+      if ((el.tagName === "H1" || el.tagName === "H2") && chapterPattern.test(el.textContent.trim())) {
+        break;
+      }
+      // 收集文本节点
+      var tag = el.tagName;
+      if (tag === "P" || tag === "DIV" || tag === "MAIN" || tag === "SECTION" || tag === "ARTICLE") {
+        var t = el.innerText ? el.innerText.trim() : "";
+        if (t.length > 3) texts.push(t);
+      }
+      el = el.nextElementSibling;
+    }
+    
+    // 如果边界提取的内容太少，尝试从容器内提取
+    if (texts.join("
+").length < 80) {
+      // 对于 main/section 等容器，提取其中的 p/div 子元素
+      var container = startEl.nextElementSibling;
+      while (container && container.tagName !== "H1" && container.tagName !== "H2") {
+        if (container.tagName === "MAIN" || container.tagName === "SECTION" || container.tagName === "ARTICLE") {
+          var paras = container.querySelectorAll("p, div[class*='line'], div[class*='text']");
+          for (var j = 0; j < paras.length; j++) {
+            var txt = paras[j].innerText ? paras[j].innerText.trim() : "";
+            if (txt.length > 3) texts.push(txt);
+          }
+          break; // 只取第一个主内容容器
+        }
+        container = container.nextElementSibling;
+      }
+    }
+    
+    var result = texts.join("
+");
+    var lines = result.split("
+").filter(function(l) { return l.length > 3; });
+    return lines.slice(0, 150).join("
+");
+  }
+
   function getChapterText() {
-    // 优先：以章节标题元素为锚点，限定查找范围，避免移动端多章拼接
+    // ═════ 移动端多章拼接修复 ═════
+    // 起点/番茄等手机版一页可能显示多章，必须按章节边界截断
+    // 策略：以第一个 h1/h2 章节标题为起点，下一个 h1/h2 为终点，只取中间的内容
+    
+    // Step 1: 尝试按章节标题边界提取
+    var boundaryText = extractByChapterBoundary();
+    if (boundaryText && boundaryText.length >= 80) return boundaryText;
+    
+    // Step 2: 回退到选择器方式
     var titleEl = findChapterTitleElement();
     var scopeEl = titleEl ? (titleEl.parentElement || document.body) : document.body;
     const containerSelectors = [
