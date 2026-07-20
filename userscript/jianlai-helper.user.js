@@ -90,19 +90,42 @@
   // ═══════════ 页面信息提取 ═══════════
 
   function getChapterTitle() {
-    const selectors = [
+    // SPA 优先：document.title 在导航后准确更新（如"第2章 劫修 - 起点"）
+    var dt = document.title.trim();
+    var m = dt.match(/第[0-9零一二三四五六七八九百千]+[章节回]\s*\S+/);
+    if (m) return m[0].replace(/\s+/g, "").substring(0, 80);
+    // 特定选择器
+    var specificSelectors = [
       ".j_chapterName", ".chapter-name", ".chaptername",
-      "h1", "h2", ".title", ".chapter-title", ".chapterTitle",
-      "[class*='chapter'] h1", "[class*='chapter'] h2",
+      ".title", ".chapter-title", ".chapterTitle",
       ".article-title", ".post-title", ".entry-title",
     ];
-    for (const sel of selectors) {
-      const el = document.querySelector(sel);
-      const text = el?.innerText?.trim();
+    for (var si = 0; si < specificSelectors.length; si++) {
+      var el = document.querySelector(specificSelectors[si]);
+      var text = el && el.innerText && el.innerText.trim();
       if (text && text.length >= 2 && text.length < 200) return text;
     }
-    const title = document.title.trim();
-    const sep = title.lastIndexOf(" - ");
+    // 移动端滚动：找视口内最近的章节标题（用户正在读的章节，而非页面第一个）
+    var headings = document.querySelectorAll("h1, h2");
+    var chapterPattern = /第[0-9零一二三四五六七八九百千]+[章节回]/;
+    var bestEl = null, bestDist = Infinity;
+    for (var i = 0; i < headings.length; i++) {
+      var h = headings[i];
+      if (!chapterPattern.test(h.textContent.trim())) continue;
+      var rect = h.getBoundingClientRect();
+      if (rect.top <= 200) {
+        var dist = 60 - rect.top;
+        if (dist < bestDist) { bestDist = dist; bestEl = h; }
+      }
+    }
+    if (bestEl) return bestEl.innerText.trim();
+    // 兜底：取第一个章节标题
+    for (var j = 0; j < headings.length; j++) {
+      if (chapterPattern.test(headings[j].textContent.trim()))
+        return headings[j].innerText.trim();
+    }
+    var title = document.title.trim();
+    var sep = title.lastIndexOf(" - ");
     if (sep > 0) return title.substring(0, sep).trim();
     return title || "未命名章节";
   }
@@ -128,73 +151,49 @@
 
   // 按章节边界提取正文（解决移动端一页多章拼接问题）
   function extractByChapterBoundary() {
-    // 找页面中的章节标题（h1 或 h2 中包含"第X章"模式）
     var headings = document.querySelectorAll("h1, h2");
     var chapterPattern = /第[0-9零一二三四五六七八九百千]+[章节回]/;
-    var startEl = null;
-    
-    // 找到第一个匹配的章节标题作为起点
+    // 找视口内最近的章节标题（用户正在读的章节）
+    var startEl = null, bestDist = Infinity;
     for (var i = 0; i < headings.length; i++) {
-      if (chapterPattern.test(headings[i].textContent.trim())) {
-        startEl = headings[i];
-        break;
+      if (!chapterPattern.test(headings[i].textContent.trim())) continue;
+      var rect = headings[i].getBoundingClientRect();
+      if (rect.top <= 200) {
+        var dist = 60 - rect.top;
+        if (dist < bestDist) { bestDist = dist; startEl = headings[i]; }
+      }
+    }
+    // 兜底：第一个章节标题
+    if (!startEl) {
+      for (var j = 0; j < headings.length; j++) {
+        if (chapterPattern.test(headings[j].textContent.trim())) { startEl = headings[j]; break; }
       }
     }
     if (!startEl) return "";
-    
-    // 收集起点到下一个章节标题之间的文本
     var texts = [];
     var el = startEl.nextElementSibling;
     while (el) {
-      // 遇到下一个章节标题就停止
-      if ((el.tagName === "H1" || el.tagName === "H2") && chapterPattern.test(el.textContent.trim())) {
+      if ((el.tagName === "H1" || el.tagName === "H2") && chapterPattern.test(el.textContent.trim())) break;
+      if (el.tagName === "MAIN" || el.tagName === "SECTION" || el.tagName === "ARTICLE") {
+        var paras = el.querySelectorAll("p, div[class*='line'], div[class*='text']");
+        for (var j = 0; j < paras.length; j++) {
+          var t = (paras[j].innerText || "").trim();
+          if (t.length > 3) texts.push(t);
+        }
         break;
-      }
-      // 收集文本节点
-      var tag = el.tagName;
-      if (tag === "P" || tag === "DIV" || tag === "MAIN" || tag === "SECTION" || tag === "ARTICLE") {
-        var t = el.innerText ? el.innerText.trim() : "";
-        if (t.length > 3) texts.push(t);
       }
       el = el.nextElementSibling;
     }
-    
-    // 如果边界提取的内容太少，尝试从容器内提取
-    if (texts.join("
-").length < 80) {
-      // 对于 main/section 等容器，提取其中的 p/div 子元素
-      var container = startEl.nextElementSibling;
-      while (container && container.tagName !== "H1" && container.tagName !== "H2") {
-        if (container.tagName === "MAIN" || container.tagName === "SECTION" || container.tagName === "ARTICLE") {
-          var paras = container.querySelectorAll("p, div[class*='line'], div[class*='text']");
-          for (var j = 0; j < paras.length; j++) {
-            var txt = paras[j].innerText ? paras[j].innerText.trim() : "";
-            if (txt.length > 3) texts.push(txt);
-          }
-          break; // 只取第一个主内容容器
-        }
-        container = container.nextElementSibling;
-      }
-    }
-    
-    var result = texts.join("
-");
-    var lines = result.split("
-").filter(function(l) { return l.length > 3; });
-    return lines.slice(0, 150).join("
-");
+    var result = texts.join("\n");
+    var lines = result.split("\n").filter(function(l) { return l.length > 3; });
+    return lines.slice(0, 150).join("\n");
   }
 
   function getChapterText() {
-    // ═════ 移动端多章拼接修复 ═════
-    // 起点/番茄等手机版一页可能显示多章，必须按章节边界截断
-    // 策略：以第一个 h1/h2 章节标题为起点，下一个 h1/h2 为终点，只取中间的内容
-    
-    // Step 1: 尝试按章节标题边界提取
+    // 移动端多章拼接修复：先尝试按章节边界截断
     var boundaryText = extractByChapterBoundary();
     if (boundaryText && boundaryText.length >= 80) return boundaryText;
-    
-    // Step 2: 回退到选择器方式
+    // 回退：选择器方式
     var titleEl = findChapterTitleElement();
     var scopeEl = titleEl ? (titleEl.parentElement || document.body) : document.body;
     const containerSelectors = [
@@ -794,9 +793,12 @@
   }
 
   function storageKey() {
-    const detail = document.getElementById("jl-detail")?.value || "standard";
-    const spoilerFree = document.getElementById("jl-spoiler-free")?.checked ? "safe" : "open";
-    return "JL_Archive_" + location.host + "_" + getChapterTitle() + "_" + detail + "_" + spoilerFree;
+    var detail = (document.getElementById("jl-detail") || {}).value || "standard";
+    var spoilerFree = (document.getElementById("jl-spoiler-free") || {}).checked ? "safe" : "open";
+    // 用 URL 路径 + 章节标题做唯一键（解决 SPA 导航后缓存混乱）
+    var urlSlug = location.pathname.replace(/\//g, "_").replace(/[^a-zA-Z0-9_一-鿿-]/g, "").substring(0, 80);
+    var title = getChapterTitle().replace(/[^a-zA-Z0-9_一-鿿-]/g, "").substring(0, 50);
+    return "JL_" + urlSlug + "_" + title + "_" + detail + "_" + spoilerFree;
   }
 
   // ═══════════ 核心操作 ═══════════
