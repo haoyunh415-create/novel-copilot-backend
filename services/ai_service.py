@@ -137,7 +137,7 @@ def analyze_text(text: str, chapter_title: str, detail_level: str = "standard", 
     )
 
     # 截断过长文本（DeepSeek 上下文窗口充足，但过长会变慢）
-    text = text[:12000] if len(text) > 12000 else text
+    text = text[:8000] if len(text) > 8000 else text
 
     prompt = f"""你是一个专业的长篇小说阅读助手。{spoiler_rule}
 
@@ -202,7 +202,7 @@ def analyze_text_stream(text: str, chapter_title: str, detail_level: str = "stan
         else "可以结合常识做阅读提示，但仍然不要透露章节正文之外的明确后文剧情。"
     )
 
-    text = text[:12000] if len(text) > 12000 else text
+    text = text[:8000] if len(text) > 8000 else text
 
     prompt = f"""你是一个专业的长篇小说阅读助手。{spoiler_rule}
 

@@ -976,7 +976,7 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
     # 超长文本智能截断
     analysis_text = req.text
     truncated = False
-    MAX_CHARS = 12000
+    MAX_CHARS = 8000
     if len(analysis_text) > MAX_CHARS:
         truncated = True
         # 尽量在段落边界截断
@@ -1117,7 +1117,7 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
     # 文本截断
     analysis_text = req.text
     truncated = False
-    MAX_CHARS = 12000
+    MAX_CHARS = 8000
     if len(analysis_text) > MAX_CHARS:
         truncated = True
         cut_point = analysis_text.rfind("\n", 0, MAX_CHARS)
@@ -1207,7 +1207,7 @@ async def analyze_guest_stream(req: GuestAnalyzeRequest, http_req: Request):
 
     analysis_text = req.text
     truncated = False
-    MAX_CHARS = 12000
+    MAX_CHARS = 8000
     if len(analysis_text) > MAX_CHARS:
         truncated = True
         cut_point = analysis_text.rfind("\n", 0, MAX_CHARS)
@@ -1276,7 +1276,7 @@ def analyze_guest(req: GuestAnalyzeRequest, http_req: Request):
     # 超长文本智能截断
     analysis_text = req.text
     truncated = False
-    MAX_CHARS = 12000
+    MAX_CHARS = 8000
     if len(analysis_text) > MAX_CHARS:
         truncated = True
         cut_point = analysis_text.rfind("\n", 0, MAX_CHARS)
