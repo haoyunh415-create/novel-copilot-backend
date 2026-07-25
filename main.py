@@ -1267,6 +1267,14 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
             else:
                 cur = conn.execute("INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?,?,?,?,?)", (user, req.book_title.strip(), req.author or "", req.source_url or "", int(time.time())))
                 book_id = cur.lastrowid
+        if not book_id and req.source_url:
+            m = re.match(r"(https?://[^/]+(/[^/]+/[^/]+/)?)", req.source_url)
+            url_prefix = m.group(1) if m else req.source_url[:60]
+            book = conn.execute("SELECT id FROM books WHERE username=? AND source_url_pattern=?", (user, url_prefix)).fetchone()
+            if book: book_id = book["id"]
+            else:
+                cur = conn.execute("INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?,?,?,?,?)", (user, req.chapter_title or url_prefix, req.author or "", url_prefix, int(time.time())))
+                book_id = cur.lastrowid
 
         cached = conn.execute("SELECT result_json FROM analyses WHERE username=? AND text_hash=? AND detail_level=? AND spoiler_free=?", (user, content_hash, req.detail_level, spoiler_int)).fetchone()
         if cached:
