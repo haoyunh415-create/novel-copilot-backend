@@ -697,7 +697,9 @@
     runBtn.style.animation = "pulse 1.5s ease infinite";
     var startTime = Date.now();
     var timer = setInterval(function () {
-      runBtn.textContent = "⏳ " + Math.floor((Date.now() - startTime) / 1000) + "s";
+      var s = Math.floor((Date.now() - startTime) / 1000);
+      runBtn.textContent = "⏳ " + s + "s";
+      setText("#jl-summary", "🤖 AI 正在分析中… (" + s + "s)");
     }, 1000);
 
     if (!document.getElementById("jl-pulse-style")) {
@@ -837,7 +839,9 @@
     runBtn.style.animation = "pulse 1.5s ease infinite";
     var runStartTime = Date.now();
     var runTimer = setInterval(function () {
-      runBtn.textContent = "⏳ " + Math.floor((Date.now() - runStartTime) / 1000) + "s";
+      var s = Math.floor((Date.now() - runStartTime) / 1000);
+      runBtn.textContent = "⏳ " + s + "s";
+      setText("#jl-summary", "🤖 AI 正在分析中… (" + s + "s)");
     }, 1000);
 
     // 添加脉冲动画
