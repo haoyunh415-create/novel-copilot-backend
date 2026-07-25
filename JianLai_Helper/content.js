@@ -709,7 +709,7 @@
         setTimeout(function () { showGuestRegisterPrompt(); }, 2000);
       }
     } catch (error) {
-      var errMsg = error.message || "分析失败，请稍后再试。";
+      var errMsg = error.message || "分析失败，请稍后再试。联系客服 QQ：2313370765";
       setText("#jl-summary", errMsg);
       if (errMsg.indexOf("免费试用次数已用完") !== -1) {
         showGuestRegisterPrompt();
@@ -886,7 +886,7 @@
 
       localStorage.setItem(storageKey(), JSON.stringify(result));
     } catch (error) {
-      var errMsg = error.message || "分析失败，请稍后再试。";
+      var errMsg = error.message || "分析失败，请稍后再试。联系客服 QQ：2313370765";
 
       // 额度不足 → 签到提醒
       if (errMsg.indexOf("额度不足") !== -1) {

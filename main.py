@@ -53,7 +53,7 @@ def friendly_error(exc: Exception) -> str:
         return "页面内容太少，请确保当前页面包含小说章节正文"
 
     # 兜底：隐藏技术细节
-    return "操作失败，请稍后重试或联系客服"
+    return "操作失败，请稍后重试。如持续失败请联系客服 QQ：2313370765"
 
 app = FastAPI(title="Novel Copilot Backend")
 
