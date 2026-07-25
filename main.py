@@ -1290,7 +1290,7 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
     async def event_stream():
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                sf = executor.submit(analyze_summary_only, analysis_text, req.chapter_title, req.spoiler_free)
+                sf = executor.submit(analyze_summary_only, analysis_text, req.chapter_title, req.spoiler_free, req.detail_level)
                 df = executor.submit(analyze_details_only, analysis_text, req.chapter_title, req.spoiler_free)
 
                 # 摘要先出
@@ -1349,7 +1349,7 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
     async def event_stream():
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                sf = executor.submit(analyze_summary_only, analysis_text, req.chapter_title, req.spoiler_free)
+                sf = executor.submit(analyze_summary_only, analysis_text, req.chapter_title, req.spoiler_free, req.detail_level)
                 df = executor.submit(analyze_details_only, analysis_text, req.chapter_title, req.spoiler_free)
 
                 summary = sf.result()

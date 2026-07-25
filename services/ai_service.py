@@ -180,11 +180,12 @@ def analyze_text(text: str, chapter_title: str, detail_level: str = "standard", 
     return _normalize_result(parsed, raw)
 
 
-def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = True):
+def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = True, detail_level: str = "standard"):
     """只生成章节摘要，~3-5 秒快速返回"""
     if not API_KEY:
         raise RuntimeError("缺少 DEEPSEEK_API_KEY")
 
+    summary_rule = SUMMARY_RULES.get(detail_level, SUMMARY_RULES["standard"])
     spoiler_rule = (
         "必须开启无剧透模式：只基于当前章节文本分析，不得引用后文剧情。"
         if spoiler_free else ""
@@ -192,7 +193,7 @@ def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = Tru
     text = text[:8000] if len(text) > 8000 else text
 
     prompt = f"""章节标题：{chapter_title}。{spoiler_rule}
-用 80-150 字总结本章核心情节。只返回 JSON：{{{{"summary":"..."}}}}。
+{summary_rule}。只返回 JSON：{{{{"summary":"..."}}}}。
 正文：{text}"""
 
     payload = _call_ai([
