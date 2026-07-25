@@ -457,6 +457,13 @@
         if (sq) sq.innerHTML = "";
       }
       renderChatHistory();
+      // 自动滚到输入框
+      setTimeout(function () {
+        var qEl = document.getElementById("jl-question");
+        if (qEl) qEl.scrollIntoView({ behavior: "smooth", block: "end" });
+        var mainEl = document.querySelector(".jl-main");
+        if (mainEl) mainEl.scrollTop = mainEl.scrollHeight;
+      }, 150);
       // 如果还没有推荐问题，尝试生成离线推荐
       if (!document.getElementById("jl-suggested-questions").innerHTML.trim()) {
         var offlineQs = generateOfflineQuestions();
@@ -1152,11 +1159,27 @@
       container.innerHTML = '<p class="jl-empty">还没有对话记录，分析章节后可以在这里向助手提问。</p>';
       return;
     }
-    container.innerHTML = _chatHistory.map(function (msg) {
+    var maxShow = 3;
+    var collapsed = _chatHistory.length > maxShow;
+    var visible = collapsed ? _chatHistory.slice(-maxShow) : _chatHistory;
+    var hidden = collapsed ? _chatHistory.slice(0, -maxShow) : [];
+    var html = "";
+    if (collapsed) {
+      html += '<div id="jl-chat-toggle" style="text-align:center;padding:4px;cursor:pointer;color:#8D6E63;font-size:11px;border-bottom:1px solid #E8DDD2;margin-bottom:6px" onclick="var h=document.getElementById(\'jl-chat-hidden\');var t=document.getElementById(\'jl-chat-toggle\');if(h.style.display===\'none\'){h.style.display=\'block\';t.textContent=\'▲ 收起历史（' + hidden.length + '条）\'}else{h.style.display=\'none\';t.textContent=\'▼ 展开历史（' + hidden.length + '条）\'}">▼ 展开历史（' + hidden.length + '条）</div>';
+      html += '<div id="jl-chat-hidden" style="display:none">';
+      hidden.forEach(function (msg) {
+        var label = msg.type === "q" ? "你" : "助手";
+        var cls = "jl-chat-msg " + (msg.type === "q" ? "q" : "a");
+        html += '<div class="' + cls + '"><span class="jl-chat-label">' + label + '</span>' + msg.text + '</div>';
+      });
+      html += '</div>';
+    }
+    visible.forEach(function (msg) {
       var label = msg.type === "q" ? "你" : "助手";
       var cls = "jl-chat-msg " + (msg.type === "q" ? "q" : "a");
-      return '<div class="' + cls + '"><span class="jl-chat-label">' + label + '</span>' + msg.text + '</div>';
-    }).join("");
+      html += '<div class="' + cls + '"><span class="jl-chat-label">' + label + '</span>' + msg.text + '</div>';
+    });
+    container.innerHTML = html;
     container.scrollTop = container.scrollHeight;
   }
 
