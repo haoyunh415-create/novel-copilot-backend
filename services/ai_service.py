@@ -13,7 +13,7 @@ _session.trust_env = False
 
 API_KEY = os.getenv("DEEPSEEK_API_KEY")
 API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
-MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
 
 
 def _extract_json(text: str):
