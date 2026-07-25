@@ -647,11 +647,17 @@
     try {
       var chapterTitle = getChapterTitle();
       setText("#jl-heading", chapterTitle);
-      setText("#jl-summary", "🤖 正在连接 AI 服务…");
-
-      var statusTimer = setTimeout(function () {
-        setText("#jl-summary", "📝 正在分析章节内容和人物关系…");
-      }, 1500);
+      var stageStart = Date.now();
+      var stages = ["🔗 正在连接 AI 服务…", "📖 AI 正在阅读章节…", "🧠 AI 正在分析伏笔和人物…", "📊 正在整理分析结果…"];
+      var stageIdx = 0;
+      setText("#jl-summary", stages[0] + " (0s)");
+      var statusTimer = setInterval(function () {
+        var elapsed = Math.floor((Date.now() - stageStart) / 1000);
+        if (elapsed > 2 && stageIdx === 0) stageIdx = 1;
+        if (elapsed > 5 && stageIdx === 1) stageIdx = 2;
+        if (elapsed > 10 && stageIdx === 2) stageIdx = 3;
+        setText("#jl-summary", stages[stageIdx] + " (" + elapsed + "s)");
+      }, 1000);
 
       var response = await fetchWithRetry(API + "/api/analyze/guest", {
         method: "POST",
@@ -715,7 +721,7 @@
         showGuestRegisterPrompt();
       }
     } finally {
-      clearTimeout(statusTimer);
+      clearInterval(statusTimer);
       isRunning = false;
       runBtn.disabled = false;
       runBtn.textContent = "重新分析";
@@ -800,11 +806,17 @@
     try {
       const chapterTitle = getChapterTitle();
       setText("#jl-heading", chapterTitle);
-      setText("#jl-summary", "🤖 正在连接 AI 服务...");
-      // 1.5 秒后更新状态（模拟阶段变化）
-      var statusTimer = setTimeout(function () {
-        setText("#jl-summary", "📝 正在分析章节内容和人物关系...");
-      }, 1500);
+      var stageStart = Date.now();
+      var stages = ["🔗 正在连接 AI 服务…", "📖 AI 正在阅读章节…", "🧠 AI 正在分析伏笔和人物…", "📊 正在整理分析结果…"];
+      var stageIdx = 0;
+      setText("#jl-summary", stages[0] + " (0s)");
+      var statusTimer = setInterval(function () {
+        var elapsed = Math.floor((Date.now() - stageStart) / 1000);
+        if (elapsed > 2 && stageIdx === 0) stageIdx = 1;
+        if (elapsed > 5 && stageIdx === 1) stageIdx = 2;
+        if (elapsed > 10 && stageIdx === 2) stageIdx = 3;
+        setText("#jl-summary", stages[stageIdx] + " (" + elapsed + "s)");
+      }, 1000);
 
       const bookTitle = getBookTitle();
       const author = getAuthor();
@@ -912,7 +924,7 @@
         summaryCard.appendChild(retryBtn);
       }
     } finally {
-      clearTimeout(statusTimer);
+      clearInterval(statusTimer);
       isRunning = false;
       runBtn.disabled = false;
       runBtn.textContent = "重新分析";
