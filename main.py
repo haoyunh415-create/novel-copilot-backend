@@ -89,6 +89,7 @@ RATE_LIMITS = {
     "verify_code": {"per_ip": 10, "window": 300},      # 每IP每5分钟最多10次验证
     "register": {"per_ip": 5, "window": 3600},          # 每IP每小时最多5次注册
     "login": {"per_ip": 20, "window": 60},              # 每IP每分钟最多20次登录
+    "guest_analyze": {"per_ip": 5, "window": 300},     # 每IP每5分钟最多5次试用分析
 }
 
 
@@ -353,6 +354,15 @@ class AnalyzeRequest(BaseModel):
     book_title: Optional[str] = Field(default=None, max_length=200)
     author: Optional[str] = Field(default=None, max_length=200)
     chapter_index: Optional[int] = Field(default=None)
+
+
+class GuestAnalyzeRequest(BaseModel):
+    guest_id: str = Field(min_length=8, max_length=128)
+    text: str = Field(min_length=20, max_length=60000)
+    chapter_title: str = Field(min_length=1, max_length=120)
+    source_url: Optional[str] = Field(default=None, max_length=1000)
+    detail_level: str = Field(default="standard", pattern="^(brief|standard|detailed)$")
+    spoiler_free: bool = True
 
 
 class BuyRequest(BaseModel):
@@ -852,29 +862,21 @@ def reset_password(req: ResetPasswordRequest):
 
 @app.get("/api/me")
 def me(user=Depends(get_user)):
-    from datetime import date as date_type
-    today = str(date_type.today())
-
     with get_db() as conn:
         row = conn.execute(
             "SELECT credits, daily_bonus_date FROM users WHERE username=?",
             (user,),
         ).fetchone()
 
-    if not row:
-        raise HTTPException(status_code=401, detail="用户不存在")
+        if not row:
+            raise HTTPException(status_code=401, detail="用户不存在")
 
-    credits = row["credits"]
-    daily_bonus = 0
-    if row["daily_bonus_date"] != today:
-        daily_bonus = 8
-        credits += daily_bonus
-        with get_db() as conn:
-            conn.execute(
-                "UPDATE users SET credits=?, daily_bonus_date=? WHERE username=?",
-                (credits, today, user),
-            )
-            log_usage(conn, user, "daily_bonus", f"每日签到 +{daily_bonus} 次", daily_bonus)
+        daily_bonus = try_daily_bonus(conn, user)
+
+        # 重新读取（try_daily_bonus 可能已更新）
+        credits = conn.execute(
+            "SELECT credits FROM users WHERE username=?", (user,),
+        ).fetchone()["credits"]
 
     return ok({
         "credits": credits,
@@ -951,15 +953,19 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
     if cached:
         return ok({"result": json.loads(cached["result_json"]), "cached": True})
 
-    # 扣额度
+    # 自动签到 + 扣额度
     with get_db() as conn:
+        bonus = try_daily_bonus(conn, user)
+
         row = conn.execute(
             "SELECT credits FROM users WHERE username=?",
             (user,),
         ).fetchone()
 
         if not row or row["credits"] <= 0:
-            return fail("额度不足，请购买后继续使用")
+            if bonus > 0:
+                return fail("额度不足，但今日签到已领取 8 次！刷新页面后重试")
+            return fail("额度不足，每日签到可领 8 次免费额度，打开插件弹窗自动领取")
 
         conn.execute(
             "UPDATE users SET credits = credits - 1 WHERE username=? AND credits > 0",
@@ -1041,6 +1047,68 @@ def submit_feedback(req: FeedbackRequest, user=Depends(get_user)):
         log_usage(conn, user, "feedback_" + req.rating,
                    f"章节: {req.chapter_title}" + (f" | {detail}" if detail else ""), 0)
     return ok({"message": "感谢反馈！"})
+
+
+@app.post("/api/analyze/guest")
+def analyze_guest(req: GuestAnalyzeRequest, http_req: Request):
+    """免登录试用分析：每个设备限 3 次，无需注册即可体验核心功能"""
+    guest_id = req.guest_id.strip()
+    guest_username = f"guest:{guest_id}"
+    client_ip = http_req.client.host if http_req.client else "unknown"
+
+    # 限流
+    allowed, retry = _check_rate_limit("guest_analyze", ip=client_ip)
+    if not allowed:
+        return fail(f"试用请求太频繁，请 {retry} 秒后再试")
+
+    # 检查试用次数
+    with get_db() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) as cnt FROM usage_logs WHERE username=? AND action='guest_analyze'",
+            (guest_username,),
+        ).fetchone()["cnt"]
+
+    if count >= 3:
+        return fail("免费试用次数已用完（3次），注册即送 10 次额度，每天签到再领 8 次！点击浏览器工具栏的 📖 图标注册即可。")
+
+    # 超长文本智能截断
+    analysis_text = req.text
+    truncated = False
+    MAX_CHARS = 12000
+    if len(analysis_text) > MAX_CHARS:
+        truncated = True
+        cut_point = analysis_text.rfind("\n", 0, MAX_CHARS)
+        if cut_point < MAX_CHARS // 2:
+            cut_point = MAX_CHARS
+        analysis_text = analysis_text[:cut_point] + "\n\n[提示：章节过长，已截取前 {:.0f}% 内容进行分析]".format(
+            cut_point / len(req.text) * 100
+        )
+
+    # 调用 AI 分析
+    try:
+        result = analyze_text(
+            analysis_text,
+            req.chapter_title,
+            detail_level=req.detail_level,
+            spoiler_free=req.spoiler_free,
+        )
+    except Exception as exc:
+        return fail(friendly_error(exc))
+
+    # 记录使用
+    with get_db() as conn:
+        log_usage(conn, guest_username, "guest_analyze",
+                  f"试用分析: {req.chapter_title}", 0)
+
+    response_data = {
+        "result": result,
+        "cached": False,
+        "guest_uses_remaining": 2 - count,
+    }
+    if truncated:
+        response_data["truncated"] = True
+        response_data["warning"] = f"章节过长（{len(req.text)}字），仅分析了前{len(analysis_text)}字"
+    return ok(response_data)
 
 
 def _find_book(conn, user: str, book_title: str = None, book_id: int = None, source_url: str = None):
@@ -1452,15 +1520,20 @@ def generate_full_report(req: FullReportRequest, user=Depends(get_user)):
     if not memories:
         return fail("章节记忆解析失败")
 
-    # 检查额度
+    # 自动签到 + 检查额度
     with get_db() as conn:
+        bonus = try_daily_bonus(conn, user)
+
         row = conn.execute(
             "SELECT credits FROM users WHERE username=?",
             (user,),
         ).fetchone()
 
         if not row or row["credits"] < FULL_REPORT_COST:
-            return fail(f"额度不足，全书复盘需要 {FULL_REPORT_COST} 次额度，当前剩余 {row['credits'] if row else 0} 次")
+            msg = f"额度不足，全书复盘需要 {FULL_REPORT_COST} 次额度，当前剩余 {row['credits'] if row else 0} 次"
+            if bonus > 0:
+                msg += "（今日签到已领 8 次）"
+            return fail(msg)
 
         # 扣额度
         conn.execute(
@@ -1707,6 +1780,28 @@ def log_usage(conn, username: str, action: str, detail: str = "", delta: int = 0
         "INSERT INTO usage_logs (username, action, detail, credits_delta, created_at) VALUES (?, ?, ?, ?, ?)",
         (username, action, detail, delta, int(time.time())),
     )
+
+
+def try_daily_bonus(conn, username: str) -> int:
+    """尝试领取每日签到奖励。返回领取的额度（0=今天已领过）。"""
+    from datetime import date as date_type
+    today = str(date_type.today())
+
+    row = conn.execute(
+        "SELECT daily_bonus_date FROM users WHERE username=?",
+        (username,),
+    ).fetchone()
+
+    if not row or row["daily_bonus_date"] == today:
+        return 0
+
+    bonus = 8
+    conn.execute(
+        "UPDATE users SET credits = credits + ?, daily_bonus_date = ? WHERE username=?",
+        (bonus, today, username),
+    )
+    log_usage(conn, username, "daily_bonus", f"每日签到 +{bonus} 次", bonus)
+    return bonus
 
 
 @app.post("/api/buy")

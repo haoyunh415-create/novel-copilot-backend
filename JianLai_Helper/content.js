@@ -277,7 +277,7 @@
             '</div>' +
           '</div>' +
           '<button id="jl-onboarding-close" style="width:100%;padding:11px;border:0;border-radius:8px;background:#5d4037;color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:all .15s">知道了，开始使用 ✨</button>' +
-          '<p style="margin:8px 0 0;font-size:10px;color:#b0a395;text-align:center">注册即送 30 次免费额度 · 每日签到 +5 次</p>' +
+          '<p style="margin:8px 0 0;font-size:10px;color:#b0a395;text-align:center">注册即送 10 次免费额度 · 每日签到 +8 次</p>' +
         '</div>' +
       '</div>';
 
@@ -594,6 +594,176 @@
     return "JL_Archive_" + location.host + "_" + getChapterTitle() + "_" + detail + "_" + spoilerFree;
   }
 
+  // ═══════════ 免登录试用 ═══════════
+
+  function getGuestId() {
+    var id = localStorage.getItem("JL_Guest_Id");
+    if (!id) {
+      id = "g_" + Math.random().toString(36).substring(2, 12) + Math.random().toString(36).substring(2, 12);
+      localStorage.setItem("JL_Guest_Id", id);
+    }
+    return id;
+  }
+
+  function getGuestUsage() {
+    return parseInt(localStorage.getItem("JL_Guest_Usage") || "0", 10);
+  }
+
+  function incrementGuestUsage() {
+    var n = getGuestUsage() + 1;
+    localStorage.setItem("JL_Guest_Usage", String(n));
+    return n;
+  }
+
+  async function runGuestAnalyze(API) {
+    if (isRunning) return;
+    var now = Date.now();
+    if (now - lastCallTime < MIN_INTERVAL_MS) {
+      setText("#jl-summary", "操作太频繁了，稍等几秒再试。");
+      return;
+    }
+    lastCallTime = now;
+
+    var usageCount = getGuestUsage();
+    if (usageCount >= 3) {
+      setText("#jl-summary", "🎯 免费试用次数已用完（3次）！\n\n注册即送 10 次额度，每天签到再领 8 次，点击浏览器工具栏的 📖 图标注册吧！");
+      showGuestRegisterPrompt();
+      return;
+    }
+
+    var text = getChapterText();
+    if (text.length < 80) {
+      setText("#jl-summary", "没有识别到足够的正文内容。");
+      return;
+    }
+
+    isRunning = true;
+    var runBtn = document.getElementById("jl-run");
+    runBtn.disabled = true;
+    runBtn.textContent = "⚡ 正在提取页面内容…";
+    runBtn.style.animation = "pulse 1.5s ease infinite";
+
+    if (!document.getElementById("jl-pulse-style")) {
+      var ps = document.createElement("style");
+      ps.id = "jl-pulse-style";
+      ps.textContent = "@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}";
+      document.head.appendChild(ps);
+    }
+
+    try {
+      var chapterTitle = getChapterTitle();
+      setText("#jl-heading", chapterTitle);
+      setText("#jl-summary", "🤖 正在连接 AI 服务…");
+
+      var statusTimer = setTimeout(function () {
+        setText("#jl-summary", "📝 正在分析章节内容和人物关系…");
+      }, 1500);
+
+      var response = await fetchWithRetry(API + "/api/analyze/guest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          guest_id: getGuestId(),
+          text: text,
+          chapter_title: chapterTitle,
+          source_url: location.href,
+          detail_level: document.getElementById("jl-detail").value,
+          spoiler_free: document.getElementById("jl-spoiler-free").checked
+        })
+      });
+
+      var payload = await response.json();
+      if (!payload.success) throw new Error(payload.error || "分析失败");
+
+      var result = normalizeResult(payload.data);
+      var newCount = incrementGuestUsage();
+      var remaining = 3 - newCount;
+
+      // 试用提示横幅
+      var summaryCard = document.querySelector("#jl-panel-summary .jl-card");
+      if (summaryCard) {
+        var trialMeta = document.createElement("div");
+        trialMeta.className = "jl-meta";
+        trialMeta.style.cssText = "background:#FFF8E1;color:#E65100;display:inline-block;margin-bottom:8px";
+        if (remaining > 0) {
+          trialMeta.textContent = "🆓 免登录试用 · 还剩 " + remaining + " 次 · 注册送 10 次 + 每日签到 8 次";
+        } else {
+          trialMeta.textContent = "🆓 试用次数已用完 · 注册送 10 次免费额度";
+        }
+        summaryCard.appendChild(trialMeta);
+      }
+
+      renderResult(result);
+
+      if (payload.data.truncated && summaryCard) {
+        var truncMeta = document.createElement("div");
+        truncMeta.className = "jl-meta";
+        truncMeta.style.cssText = "background:#FFF8E1;color:#E65100";
+        truncMeta.textContent = payload.data.warning || "章节过长，内容已截断";
+        summaryCard.appendChild(truncMeta);
+      }
+
+      localStorage.setItem(storageKey(), JSON.stringify(result));
+
+      // 首次试用引导
+      if (newCount === 1) {
+        showGuestTrialGuide(remaining);
+      }
+
+      // 最后一次：弹出注册引导
+      if (remaining === 0) {
+        setTimeout(function () { showGuestRegisterPrompt(); }, 2000);
+      }
+    } catch (error) {
+      var errMsg = error.message || "分析失败，请稍后再试。";
+      setText("#jl-summary", errMsg);
+      if (errMsg.indexOf("免费试用次数已用完") !== -1) {
+        showGuestRegisterPrompt();
+      }
+    } finally {
+      clearTimeout(statusTimer);
+      isRunning = false;
+      runBtn.disabled = false;
+      runBtn.textContent = "重新分析";
+      runBtn.style.animation = "";
+    }
+  }
+
+  function showGuestTrialGuide(remaining) {
+    var old = document.getElementById("jl-guest-guide");
+    if (old) old.remove();
+    var panel = document.getElementById("jl-panel-summary");
+    var banner = document.createElement("div");
+    banner.id = "jl-guest-guide";
+    banner.className = "jl-card";
+    banner.style.cssText = "border-left:3px solid #F57C00;background:#FFF8E1;margin-bottom:10px";
+    banner.innerHTML =
+      '<h3 style="color:#E65100">🆓 免登录试用中</h3>' +
+      '<p style="font-size:12px;color:#5D4037;margin:4px 0">你还有 <b>' + remaining + ' 次</b> 免费试用机会，用完即止。</p>' +
+      '<p style="font-size:11px;color:#8D6E63;margin:4px 0">📖 注册即送 <b>10 次</b> 额度 · 每日签到领 <b>8 次</b></p>' +
+      '<p style="font-size:11px;color:#8D6E63;margin:4px 0">点击浏览器工具栏的 📖 图标即可注册</p>';
+    panel.insertBefore(banner, panel.firstChild);
+  }
+
+  function showGuestRegisterPrompt() {
+    var oldGuide = document.getElementById("jl-guest-guide");
+    if (oldGuide) oldGuide.remove();
+    var oldReg = document.getElementById("jl-guest-register");
+    if (oldReg) return; // 已经显示过
+
+    var panel = document.getElementById("jl-panel-summary");
+    var banner = document.createElement("div");
+    banner.id = "jl-guest-register";
+    banner.className = "jl-card";
+    banner.style.cssText = "border-left:3px solid #2E7D32;background:#E8F5E9;margin-bottom:10px";
+    banner.innerHTML =
+      '<h3 style="color:#2E7D32">🎉 喜欢鉴来助手？</h3>' +
+      '<p style="font-size:12px;color:#5D4037;margin:4px 0">注册账号即可获得 <b>10 次</b> 免费额度，每日签到再领 <b>8 次</b>！</p>' +
+      '<p style="font-size:11px;color:#8D6E63;margin:4px 0">📖 点击浏览器工具栏的橙色书图标 → 输入邮箱 → 验证码登录，只需 30 秒</p>' +
+      '<p style="font-size:11px;color:#8D6E63;margin:4px 0">🔮 注册后可解锁：伏笔追踪 · 全书复盘 · 人物关系图 · 跨设备同步</p>';
+    panel.insertBefore(banner, panel.firstChild);
+  }
+
   // ═══════════ 核心操作 ═══════════
 
   async function runAnalyze() {
@@ -608,7 +778,7 @@
     const API = await getAPI();
     const token = await getToken();
     if (!token) {
-      setText("#jl-summary", "请先在插件弹窗中登录。");
+      await runGuestAnalyze(API);
       return;
     }
 
@@ -725,7 +895,7 @@
 
       // 额度不足 → 签到提醒
       if (errMsg.indexOf("额度不足") !== -1) {
-        errMsg += "\n\n💡 每天签到免费领 5 次额度，打开插件弹窗即可自动领取";
+        errMsg += "\n\n💡 每天签到免费领 8 次额度，打开插件弹窗即可自动领取";
       }
 
       setText("#jl-summary", errMsg);

@@ -33,6 +33,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $("send-code-btn").addEventListener("click", sendEmailCode);
   $("email-login-btn").addEventListener("click", emailLogin);
+  // 免登录试用
+  var guestBtn = $("guest-trial-btn");
+  if (guestBtn) guestBtn.addEventListener("click", startAnalyze);
   // 套餐按钮
   document.querySelectorAll(".buy-plan-btn").forEach(function (btn) {
     btn.addEventListener("click", function () { buy(btn.dataset.plan); });
