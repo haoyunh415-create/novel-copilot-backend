@@ -409,7 +409,24 @@
 
   function updateSummaryTitle() {
     var el = document.getElementById("jl-summary-title");
-    if (el) el.textContent = "本章概况 · " + getModeLabel();
+    if (!el) return;
+    var label = getModeLabel();
+    el.innerHTML = '本章概况 · <span id="jl-mode-toggle" style="cursor:pointer;color:#8D6E63;border-bottom:1px dashed #8D6E63" title="点击切换分析模式">' + label + ' ▾</span>';
+    var toggle = document.getElementById("jl-mode-toggle");
+    if (toggle) {
+      toggle.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var sel = document.getElementById("jl-detail");
+        if (!sel) return;
+        var modes = ["standard", "detailed", "brief"];
+        var labels = ["标准概况", "详细前情提要", "快速概况"];
+        var idx = modes.indexOf(sel.value);
+        idx = (idx + 1) % 3;
+        sel.value = modes[idx];
+        localStorage.setItem("JL_Detail_Level", sel.value);
+        updateSummaryTitle();
+      });
+    }
   }
 
   function switchPanel(panel) {
