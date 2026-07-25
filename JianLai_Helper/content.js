@@ -426,6 +426,7 @@
       loadOverview();
     }
     if (panel === "summary") {
+      updateSummaryTitle();
       loadAnalysisHistory();
     }
     if (panel === "qa") {
