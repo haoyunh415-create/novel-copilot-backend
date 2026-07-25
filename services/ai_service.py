@@ -180,6 +180,67 @@ def analyze_text(text: str, chapter_title: str, detail_level: str = "standard", 
     return _normalize_result(parsed, raw)
 
 
+def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = True):
+    """只生成章节摘要，~3-5 秒快速返回"""
+    if not API_KEY:
+        raise RuntimeError("缺少 DEEPSEEK_API_KEY")
+
+    spoiler_rule = (
+        "必须开启无剧透模式：只基于当前章节文本分析，不得引用后文剧情。"
+        if spoiler_free else ""
+    )
+    text = text[:8000] if len(text) > 8000 else text
+
+    prompt = f"""章节标题：{chapter_title}。{spoiler_rule}
+用 80-150 字总结本章核心情节。只返回 JSON：{{{{"summary":"..."}}}}。
+正文：{text}"""
+
+    payload = _call_ai([
+        {"role": "system", "content": "你是一个专业的小说分析助手，只返回 JSON。"},
+        {"role": "user", "content": prompt},
+    ], temperature=0.2, timeout=30)
+
+    try:
+        raw = payload["choices"][0]["message"]["content"]
+        return _extract_json(raw)
+    except Exception:
+        return {"summary": raw[:200] if raw else "分析失败"}
+
+
+def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = True):
+    """生成人物、伏笔、术语、关系图（不含摘要），~12-15 秒"""
+    if not API_KEY:
+        raise RuntimeError("缺少 DEEPSEEK_API_KEY")
+
+    spoiler_rule = (
+        "必须开启无剧透模式：只基于当前章节文本分析，不得引用后文剧情。"
+        if spoiler_free else ""
+    )
+    text = text[:8000] if len(text) > 8000 else text
+
+    prompt = f"""章节标题：{chapter_title}。{spoiler_rule}
+分析以下内容，严格按 JSON 返回：
+- characters：2-5 个关键人物（name + note 10字以内）
+- foreshadowing：0-3 条伏笔线索（clue + reason 15字以内 + confidence 0-100）
+- terms：0-3 个关键术语（term + meaning）
+- graph：人物关系 nodes（id、label、level）+ edges（from、to、label）
+JSON 格式：{{{{"characters":[{{{{"name":"","note":""}}}}],"foreshadowing":[{{{{"clue":"","reason":"","confidence":70}}}}],"terms":[{{{{"term":"","meaning":""}}}}],"graph":{{{{"nodes":[{{{{"id":"n1","label":"","level":"core"}}}}],"edges":[{{{{"from":"n1","to":"n2","label":""}}}}]}}}}}}}}
+正文：{text}"""
+
+    payload = _call_ai([
+        {"role": "system", "content": "你是一个专业的小说分析助手，只返回 JSON。"},
+        {"role": "user", "content": prompt},
+    ], temperature=0.2, timeout=45)
+
+    try:
+        raw = payload["choices"][0]["message"]["content"]
+        parsed = _extract_json(raw)
+        return _normalize_result({**parsed, "summary": ""}, raw)
+    except Exception:
+        clean = re.sub(r"```[\s\S]*?```", "", payload["choices"][0]["message"]["content"]).strip()
+        return _normalize_result({"summary": "", "characters": [], "foreshadowing": [], "terms": [], "graph": {"nodes": [], "edges": []}}, clean, degraded=True)
+
+
 def analyze_text_stream(text: str, chapter_title: str, detail_level: str = "standard", spoiler_free: bool = True):
     """流式分析章节，yield (event_type: str, data: dict) 元组。
 

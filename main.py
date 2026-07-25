@@ -1241,6 +1241,140 @@ async def analyze_guest_stream(req: GuestAnalyzeRequest, http_req: Request):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@app.post("/api/analyze/progressive")
+async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
+    """渐进式分析：摘要先出（~5s），详情后出（~15s），两者并行调用"""
+    from services.ai_service import analyze_summary_only, analyze_details_only
+    import concurrent.futures
+
+    allowed, retry = _check_rate_limit("analyze", user=user)
+    if not allowed:
+        return fail(f"请求太频繁，请 {retry} 秒后再试")
+
+    now = time.time()
+    if now - user_last_request.get(user, 0) < 2:
+        return fail("请求太频繁了，请稍后再试")
+    user_last_request[user] = now
+    _cleanup_user_last_request()
+
+    content_hash = text_hash(req.text)
+    spoiler_int = 1 if req.spoiler_free else 0
+    book_id = None
+    with get_db() as conn:
+        if req.book_title and req.book_title.strip():
+            book = conn.execute("SELECT id FROM books WHERE username=? AND title=?", (user, req.book_title.strip())).fetchone()
+            if book: book_id = book["id"]
+            else:
+                cur = conn.execute("INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?,?,?,?,?)", (user, req.book_title.strip(), req.author or "", req.source_url or "", int(time.time())))
+                book_id = cur.lastrowid
+
+        cached = conn.execute("SELECT result_json FROM analyses WHERE username=? AND text_hash=? AND detail_level=? AND spoiler_free=?", (user, content_hash, req.detail_level, spoiler_int)).fetchone()
+        if cached:
+            async def ce(): yield f"data: {json.dumps({'type': 'done', 'data': {'result': json.loads(cached['result_json']), 'cached': True, 'book_id': book_id}}, ensure_ascii=False)}\n\n"
+            return StreamingResponse(ce(), media_type="text/event-stream")
+
+        bonus = try_daily_bonus(conn, user)
+        row = conn.execute("SELECT credits FROM users WHERE username=?", (user,)).fetchone()
+        if not row or row["credits"] <= 0:
+            if bonus > 0: return fail("额度不足，但今日签到已领取 8 次！刷新页面后重试")
+            return fail("额度不足，每日签到可领 8 次免费额度")
+        conn.execute("UPDATE users SET credits = credits - 1 WHERE username=? AND credits > 0", (user,))
+        log_usage(conn, user, "analyze", f"分析章节: {req.chapter_title}", -1)
+
+    analysis_text = req.text
+    if len(analysis_text) > 8000:
+        cut = analysis_text.rfind("\n", 0, 8000)
+        if cut < 4000: cut = 8000
+        analysis_text = analysis_text[:cut]
+
+    async def event_stream():
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                sf = executor.submit(analyze_summary_only, analysis_text, req.chapter_title, req.spoiler_free)
+                df = executor.submit(analyze_details_only, analysis_text, req.chapter_title, req.spoiler_free)
+
+                # 摘要先出
+                summary = sf.result()
+                yield f"data: {json.dumps({'type': 'summary', 'data': summary}, ensure_ascii=False)}\n\n"
+
+                # 详情后出
+                details = df.result()
+                result = {**summary, **details}
+                if not result.get("summary"):
+                    result["summary"] = summary.get("summary", "")
+
+                try:
+                    with get_db() as db_conn:
+                        db_conn.execute("INSERT OR REPLACE INTO analyses (username, book_id, chapter_title, chapter_index, source_url, text_hash, detail_level, spoiler_free, result_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (user, book_id, req.chapter_title, req.chapter_index, req.source_url, content_hash, req.detail_level, spoiler_int, json.dumps(result, ensure_ascii=False), int(time.time())))
+                        if book_id: db_conn.execute("UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?", (book_id, book_id))
+                except Exception:
+                    pass
+
+                yield f"data: {json.dumps({'type': 'done', 'data': {'result': result, 'cached': False, 'book_id': book_id}}, ensure_ascii=False)}\n\n"
+        except Exception as exc:
+            try:
+                with get_db() as db_conn:
+                    db_conn.execute("UPDATE users SET credits = credits + 1 WHERE username=?", (user,))
+            except Exception:
+                pass
+            yield f"data: {json.dumps({'type': 'error', 'message': friendly_error(exc)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/analyze/guest/progressive")
+async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request):
+    """免登录渐进式试用分析"""
+    from services.ai_service import analyze_summary_only, analyze_details_only
+    import concurrent.futures
+
+    guest_id = req.guest_id.strip()
+    guest_username = f"guest:{guest_id}"
+    client_ip = http_req.client.host if http_req.client else "unknown"
+
+    allowed, retry = _check_rate_limit("guest_analyze", ip=client_ip)
+    if not allowed:
+        return fail(f"试用请求太频繁，请 {retry} 秒后再试")
+
+    with get_db() as conn:
+        count = conn.execute("SELECT COUNT(*) as cnt FROM usage_logs WHERE username=? AND action='guest_analyze'", (guest_username,)).fetchone()["cnt"]
+    if count >= 3:
+        return fail("免费试用次数已用完（3次），注册即送 10 次额度！")
+
+    analysis_text = req.text
+    if len(analysis_text) > 8000:
+        cut = analysis_text.rfind("\n", 0, 8000)
+        if cut < 4000: cut = 8000
+        analysis_text = analysis_text[:cut]
+
+    async def event_stream():
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                sf = executor.submit(analyze_summary_only, analysis_text, req.chapter_title, req.spoiler_free)
+                df = executor.submit(analyze_details_only, analysis_text, req.chapter_title, req.spoiler_free)
+
+                summary = sf.result()
+                yield f"data: {json.dumps({'type': 'summary', 'data': summary}, ensure_ascii=False)}\n\n"
+
+                details = df.result()
+                result = {**summary, **details}
+                if not result.get("summary"):
+                    result["summary"] = summary.get("summary", "")
+
+                try:
+                    with get_db() as db_conn:
+                        log_usage(db_conn, guest_username, "guest_analyze", f"试用分析: {req.chapter_title}", 0)
+                except Exception:
+                    pass
+
+                remaining = 2 - count
+                yield f"data: {json.dumps({'type': 'done', 'data': {'result': result, 'cached': False, 'guest_uses_remaining': remaining}}, ensure_ascii=False)}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': friendly_error(exc)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @app.post("/api/feedback")
 def submit_feedback(req: FeedbackRequest, user=Depends(get_user)):
     """收集用户对分析结果的评价"""
