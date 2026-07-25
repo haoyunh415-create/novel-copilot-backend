@@ -319,7 +319,7 @@
       '</div>' +
       '<div class="jl-main">' +
         '<section id="jl-panel-summary" class="jl-panel is-active">' +
-          '<div class="jl-card"><h3>本章概况</h3><p id="jl-summary">点击下方按钮开始分析。</p></div>' +
+          '<div class="jl-card"><h3 id="jl-summary-title">本章概况</h3><p id="jl-summary">点击下方按钮开始分析。</p></div>' +
           '<div class="jl-card"><h3>关键人物</h3><div id="jl-characters"><p class="jl-empty">暂无</p></div></div>' +
           '<div class="jl-card"><h3>名词解释</h3><div id="jl-terms"><p class="jl-empty">暂无</p></div></div>' +
         '</section>' +
@@ -388,7 +388,28 @@
       tab.addEventListener("click", () => switchPanel(tab.dataset.panel));
     });
 
+    // 恢复上次选择的模式
+    var savedMode = localStorage.getItem("JL_Detail_Level");
+    if (savedMode === "brief" || savedMode === "standard" || savedMode === "detailed") {
+      win.querySelector("#jl-detail").value = savedMode;
+    }
+    updateSummaryTitle();
+    win.querySelector("#jl-detail").addEventListener("change", function () {
+      localStorage.setItem("JL_Detail_Level", this.value);
+      updateSummaryTitle();
+    });
+
     return win;
+  }
+
+  function getModeLabel() {
+    var v = (document.getElementById("jl-detail") || {}).value || "standard";
+    return v === "brief" ? "快速概况" : v === "detailed" ? "详细前情提要" : "标准概况";
+  }
+
+  function updateSummaryTitle() {
+    var el = document.getElementById("jl-summary-title");
+    if (el) el.textContent = "本章概况 · " + getModeLabel();
   }
 
   function switchPanel(panel) {
@@ -701,7 +722,8 @@
     var timer = setInterval(function () {
       var s = Math.floor((Date.now() - startTime) / 1000);
       runBtn.textContent = "⏳ " + s + "s";
-      setText("#jl-summary", "🤖 AI 正在分析中… (" + s + "s)");
+      var mode = getModeLabel();
+      setText("#jl-summary", "🤖 AI 正在分析…（" + mode + " " + s + "s）");
     }, 1000);
 
     if (!document.getElementById("jl-pulse-style")) {
@@ -713,7 +735,7 @@
 
     var chapterTitle = getChapterTitle();
     setText("#jl-heading", chapterTitle);
-    setText("#jl-summary", "🤖 AI 正在分析中…");
+    setText("#jl-summary", "🤖 AI 正在分析…（" + getModeLabel() + "）");
 
     try {
       var _summaryFirst = false;
@@ -846,7 +868,7 @@
     var runTimer = setInterval(function () {
       var s = Math.floor((Date.now() - runStartTime) / 1000);
       runBtn.textContent = "⏳ " + s + "s";
-      setText("#jl-summary", "🤖 AI 正在分析中… (" + s + "s)");
+      setText("#jl-summary", "🤖 AI 正在分析…（" + getModeLabel() + " " + s + "s）");
     }, 1000);
 
     // 添加脉冲动画
