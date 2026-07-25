@@ -180,6 +180,132 @@ def analyze_text(text: str, chapter_title: str, detail_level: str = "standard", 
     return _normalize_result(parsed, raw)
 
 
+def analyze_text_stream(text: str, chapter_title: str, detail_level: str = "standard", spoiler_free: bool = True):
+    """流式分析章节，yield (event_type: str, data: dict) 元组。
+
+    event_type 取值：
+    - "progress": 阶段变化，data={"stage": "connecting|reading|parsing", "elapsed_s": float}
+    - "done": 完成，data={"result": {...}}（同 analyze_text 返回格式）
+    - "error": 失败，data={"message": str}
+    """
+    import time as _time_module
+    start_time = _time_module.time()
+
+    if not API_KEY:
+        yield ("error", {"message": "服务器 AI 服务未配置，请联系管理员"})
+        return
+
+    summary_rule = SUMMARY_RULES.get(detail_level, SUMMARY_RULES["standard"])
+    spoiler_rule = (
+        "必须开启无剧透模式：只基于当前章节文本分析，不得引用后文剧情、百科资料、读者评论或模型记忆。"
+        if spoiler_free
+        else "可以结合常识做阅读提示，但仍然不要透露章节正文之外的明确后文剧情。"
+    )
+
+    text = text[:12000] if len(text) > 12000 else text
+
+    prompt = f"""你是一个专业的长篇小说阅读助手。{spoiler_rule}
+
+章节标题：{chapter_title}
+
+输出要求（严格 JSON，不能有任何其他内容）：
+1. {summary_rule}
+2. characters：列出本章出现/提及的 3-8 个关键人物。每人必须包含 name（名称）和 note（本章中的角色/动向，20字以内）
+3. foreshadowing：列出 0-5 条疑似伏笔或需要留意的线索。每条包含 clue（线索描述）、reason（为什么是伏笔，30字以内）、confidence（0-100 的可信度评分）
+4. terms：列出 0-5 个读者需要记住的地名、物品、势力、修炼术语。每条包含 term（术语）和 meaning（含义解释）
+5. graph.nodes：3-8 个关键人物节点，每人用 id、label、level（主角=core，其他=normal）
+6. graph.edges：人物之间的关系边，用 from、to、label（关系描述，如"师徒""盟友""敌对"）
+
+严格按此 JSON 结构返回：
+{{{{"summary":"...","characters":[{{{{"name":"","note":""}}}}],"foreshadowing":[{{{{"clue":"","reason":"","confidence":70}}}}],"terms":[{{{{"term":"","meaning":""}}}}],"graph":{{{{"nodes":[{{{{"id":"n1","label":"","level":"core"}}}}],"edges":[{{{{"from":"n1","to":"n2","label":""}}}}]}}}}}}}}
+
+章节正文：
+{text}"""
+
+    yield ("progress", {"stage": "connecting", "elapsed_s": round(_time_module.time() - start_time, 1)})
+
+    try:
+        response = _session.post(
+            API_URL,
+            headers={
+                "Authorization": f"Bearer {API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": MODEL,
+                "messages": [
+                    {"role": "system", "content": "你是一个专业的小说分析助手，只返回符合要求的 JSON，不输出任何其他内容。"},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.2,
+                "stream": True,
+            },
+            timeout=(15, 90),
+            stream=True,
+        )
+        response.raise_for_status()
+    except requests.Timeout:
+        yield ("error", {"message": "AI 服务响应超时，章节内容太长或网络不稳定，请稍后重试"})
+        return
+    except requests.ConnectionError:
+        yield ("error", {"message": "无法连接 AI 服务，请检查网络后重试"})
+        return
+    except requests.HTTPError as e:
+        status = e.response.status_code if e.response else None
+        if status == 429:
+            yield ("error", {"message": "AI 服务繁忙，请稍等几秒后重试"})
+        elif status in (401, 403):
+            yield ("error", {"message": "AI 服务认证失败，请联系管理员检查 API Key"})
+        else:
+            yield ("error", {"message": f"AI 服务暂时不可用（{status}），请稍后重试"})
+        return
+
+    yield ("progress", {"stage": "reading", "elapsed_s": round(_time_module.time() - start_time, 1)})
+
+    accumulated = ""
+    try:
+        for line in response.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data: "):
+                continue
+            data_str = line[6:]
+            if data_str == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data_str)
+                content = chunk["choices"][0].get("delta", {}).get("content", "")
+                if content:
+                    accumulated += content
+            except (json.JSONDecodeError, KeyError, IndexError):
+                continue
+    except requests.Timeout:
+        yield ("error", {"message": "AI 服务响应超时，请稍后重试"})
+        return
+    except Exception as e:
+        yield ("error", {"message": f"AI 流式读取异常，请稍后重试"})
+        return
+
+    yield ("progress", {"stage": "parsing", "elapsed_s": round(_time_module.time() - start_time, 1)})
+
+    if not accumulated or len(accumulated) < 10:
+        yield ("error", {"message": "AI 返回内容异常，请稍后重试"})
+        return
+
+    # JSON 解析，失败降级为纯文本摘要
+    try:
+        parsed = _extract_json(accumulated)
+    except (ValueError, json.JSONDecodeError):
+        clean_text = re.sub(r"```[\s\S]*?```", "", accumulated).strip()
+        if len(clean_text) < 20:
+            yield ("error", {"message": "AI 返回内容异常，请稍后重试"})
+            return
+        result = _normalize_result({"summary": clean_text[:800]}, accumulated, degraded=True)
+        yield ("done", {"result": result})
+        return
+
+    result = _normalize_result(parsed, accumulated)
+    yield ("done", {"result": result})
+
+
 def answer_from_memory(question: str, memories: list[dict], spoiler_free: bool = True):
     if not API_KEY:
         raise RuntimeError("缺少 DEEPSEEK_API_KEY")

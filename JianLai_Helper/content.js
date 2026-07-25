@@ -594,6 +594,65 @@
     return "JL_Archive_" + location.host + "_" + getChapterTitle() + "_" + detail + "_" + spoilerFree;
   }
 
+  // ═══════════ 流式响应消费 ═══════════
+
+  async function consumeSSE(response, callbacks) {
+    // callbacks: { onProgress(stage, elapsed), onDone(data), onError(message) }
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = "";
+    try {
+      while (true) {
+        var chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        var lines = buffer.split("\n");
+        buffer = lines.pop(); // 保留最后一行不完整数据
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i];
+          if (line.indexOf("data: ") !== 0) continue;
+          try {
+            var event = JSON.parse(line.substring(6));
+            if (event.type === "progress") {
+              callbacks.onProgress(event.stage, event.elapsed_s || 0);
+            } else if (event.type === "done") {
+              callbacks.onDone(event.data);
+            } else if (event.type === "error") {
+              callbacks.onError(event.message);
+            }
+          } catch (_) { /* skip malformed JSON */ }
+        }
+      }
+    } catch (e) {
+      callbacks.onError("网络连接中断，请刷新页面后重试。联系客服 QQ：2313370765");
+    }
+  }
+
+  async function streamFetch(url, options, callbacks) {
+    // callbacks: { onProgress(stage, elapsed), onDone(data), onError(message) }
+    var response = await fetch(url, options);
+    var ct = response.headers.get("content-type") || "";
+
+    if (!response.ok) {
+      try {
+        var errData = await response.json();
+        throw new Error(errData.error || errData.detail || "服务器错误(" + response.status + ")");
+      } catch (e) {
+        if ((e.message || "").indexOf("服务器错误") === 0) throw e;
+        throw new Error("服务器错误(" + response.status + ")");
+      }
+    }
+
+    if (ct.indexOf("text/event-stream") !== -1) {
+      await consumeSSE(response, callbacks);
+    } else {
+      // 非流式 JSON 响应（如中间件错误），当作即时 done 处理
+      var payload = await response.json();
+      if (!payload.success) throw new Error(payload.error || "请求失败");
+      callbacks.onDone(payload.data);
+    }
+  }
+
   // ═══════════ 免登录试用 ═══════════
 
   function getGuestId() {
@@ -634,7 +693,7 @@
     isRunning = true;
     var runBtn = document.getElementById("jl-run");
     runBtn.disabled = true;
-    runBtn.textContent = "⚡ 正在提取页面内容…";
+    runBtn.textContent = "⏳ 正在连接…";
     runBtn.style.animation = "pulse 1.5s ease infinite";
 
     if (!document.getElementById("jl-pulse-style")) {
@@ -644,22 +703,13 @@
       document.head.appendChild(ps);
     }
 
-    try {
-      var chapterTitle = getChapterTitle();
-      setText("#jl-heading", chapterTitle);
-      var stageStart = Date.now();
-      var stages = ["🔗 正在连接 AI 服务…", "📖 AI 正在阅读章节…", "🧠 AI 正在分析伏笔和人物…", "📊 正在整理分析结果…"];
-      var stageIdx = 0;
-      setText("#jl-summary", stages[0] + " (0s)");
-      var statusTimer = setInterval(function () {
-        var elapsed = Math.floor((Date.now() - stageStart) / 1000);
-        if (elapsed > 2 && stageIdx === 0) stageIdx = 1;
-        if (elapsed > 5 && stageIdx === 1) stageIdx = 2;
-        if (elapsed > 10 && stageIdx === 2) stageIdx = 3;
-        setText("#jl-summary", stages[stageIdx] + " (" + elapsed + "s)");
-      }, 1000);
+    var chapterTitle = getChapterTitle();
+    setText("#jl-heading", chapterTitle);
+    setText("#jl-summary", "🔗 正在连接 AI 服务…");
 
-      var response = await fetchWithRetry(API + "/api/analyze/guest", {
+    try {
+      var _summaryCardForGuest = document.querySelector("#jl-panel-summary .jl-card");
+      await streamFetch(API + "/api/analyze/guest/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -670,58 +720,53 @@
           detail_level: document.getElementById("jl-detail").value,
           spoiler_free: document.getElementById("jl-spoiler-free").checked
         })
-      });
+      }, {
+        onProgress: function(stage, elapsed) {
+          var labels = { connecting: "🔗 正在连接 AI 服务…", reading: "📖 AI 正在阅读章节…", parsing: "📊 正在整理分析结果…" };
+          var label = labels[stage] || stage;
+          var s = Math.round(elapsed);
+          setText("#jl-summary", label + " (" + s + "s)");
+          runBtn.textContent = "⏳ " + s + "s";
+        },
+        onDone: function(data) {
+          var result = normalizeResult(data);
+          var newCount = incrementGuestUsage();
+          var remaining = 3 - newCount;
 
-      var payload = await response.json();
-      if (!payload.success) throw new Error(payload.error || "分析失败");
+          if (_summaryCardForGuest) {
+            var trialMeta = document.createElement("div");
+            trialMeta.className = "jl-meta";
+            trialMeta.style.cssText = "background:#FFF8E1;color:#E65100;display:inline-block;margin-bottom:8px";
+            trialMeta.textContent = remaining > 0
+              ? "🆓 免登录试用 · 还剩 " + remaining + " 次 · 注册送 10 次 + 每日签到 8 次"
+              : "🆓 试用次数已用完 · 注册送 10 次免费额度";
+            _summaryCardForGuest.appendChild(trialMeta);
+          }
 
-      var result = normalizeResult(payload.data);
-      var newCount = incrementGuestUsage();
-      var remaining = 3 - newCount;
+          renderResult(result);
 
-      // 试用提示横幅
-      var summaryCard = document.querySelector("#jl-panel-summary .jl-card");
-      if (summaryCard) {
-        var trialMeta = document.createElement("div");
-        trialMeta.className = "jl-meta";
-        trialMeta.style.cssText = "background:#FFF8E1;color:#E65100;display:inline-block;margin-bottom:8px";
-        if (remaining > 0) {
-          trialMeta.textContent = "🆓 免登录试用 · 还剩 " + remaining + " 次 · 注册送 10 次 + 每日签到 8 次";
-        } else {
-          trialMeta.textContent = "🆓 试用次数已用完 · 注册送 10 次免费额度";
+          if (data.truncated && _summaryCardForGuest) {
+            var truncMeta = document.createElement("div");
+            truncMeta.className = "jl-meta";
+            truncMeta.style.cssText = "background:#FFF8E1;color:#E65100";
+            truncMeta.textContent = data.warning || "章节过长，内容已截断";
+            _summaryCardForGuest.appendChild(truncMeta);
+          }
+
+          localStorage.setItem(storageKey(), JSON.stringify(result));
+
+          if (newCount === 1) showGuestTrialGuide(remaining);
+          if (remaining === 0) setTimeout(function () { showGuestRegisterPrompt(); }, 2000);
+        },
+        onError: function(message) {
+          setText("#jl-summary", message);
         }
-        summaryCard.appendChild(trialMeta);
-      }
-
-      renderResult(result);
-
-      if (payload.data.truncated && summaryCard) {
-        var truncMeta = document.createElement("div");
-        truncMeta.className = "jl-meta";
-        truncMeta.style.cssText = "background:#FFF8E1;color:#E65100";
-        truncMeta.textContent = payload.data.warning || "章节过长，内容已截断";
-        summaryCard.appendChild(truncMeta);
-      }
-
-      localStorage.setItem(storageKey(), JSON.stringify(result));
-
-      // 首次试用引导
-      if (newCount === 1) {
-        showGuestTrialGuide(remaining);
-      }
-
-      // 最后一次：弹出注册引导
-      if (remaining === 0) {
-        setTimeout(function () { showGuestRegisterPrompt(); }, 2000);
-      }
+      });
     } catch (error) {
-      var errMsg = error.message || "分析失败，请稍后再试。联系客服 QQ：2313370765";
+      var errMsg = (error && error.message) || "分析失败，请稍后再试。联系客服 QQ：2313370765";
       setText("#jl-summary", errMsg);
-      if (errMsg.indexOf("免费试用次数已用完") !== -1) {
-        showGuestRegisterPrompt();
-      }
+      if (errMsg.indexOf("免费试用次数已用完") !== -1) showGuestRegisterPrompt();
     } finally {
-      clearInterval(statusTimer);
       isRunning = false;
       runBtn.disabled = false;
       runBtn.textContent = "重新分析";
@@ -806,23 +851,13 @@
     try {
       const chapterTitle = getChapterTitle();
       setText("#jl-heading", chapterTitle);
-      var stageStart = Date.now();
-      var stages = ["🔗 正在连接 AI 服务…", "📖 AI 正在阅读章节…", "🧠 AI 正在分析伏笔和人物…", "📊 正在整理分析结果…"];
-      var stageIdx = 0;
-      setText("#jl-summary", stages[0] + " (0s)");
-      var statusTimer = setInterval(function () {
-        var elapsed = Math.floor((Date.now() - stageStart) / 1000);
-        if (elapsed > 2 && stageIdx === 0) stageIdx = 1;
-        if (elapsed > 5 && stageIdx === 1) stageIdx = 2;
-        if (elapsed > 10 && stageIdx === 2) stageIdx = 3;
-        setText("#jl-summary", stages[stageIdx] + " (" + elapsed + "s)");
-      }, 1000);
+      setText("#jl-summary", "🔗 正在连接 AI 服务…");
 
       const bookTitle = getBookTitle();
       const author = getAuthor();
       const chapterIndex = getChapterIndex();
 
-      const response = await fetchWithRetry(API + "/api/analyze", {
+      await streamFetch(API + "/api/analyze/stream", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -838,69 +873,74 @@
           author: author || undefined,
           chapter_index: chapterIndex
         })
-      });
+      }, {
+        onProgress: function(stage, elapsed) {
+          var labels = { connecting: "🔗 正在连接 AI 服务…", reading: "📖 AI 正在阅读章节…", parsing: "📊 正在整理分析结果…" };
+          var label = labels[stage] || stage;
+          var s = Math.round(elapsed);
+          setText("#jl-summary", label + " (" + s + "s)");
+          runBtn.textContent = "⏳ " + s + "s";
+        },
+        onDone: function(data) {
+          var result = normalizeResult(data);
+          renderResult(result);
 
-      const payload = await response.json();
-      if (!payload.success) throw new Error(payload.error || "分析失败");
+          if (data.truncated) {
+            var truncMeta = document.createElement("div");
+            truncMeta.className = "jl-meta";
+            truncMeta.style.cssText = "background:#FFF8E1;color:#E65100";
+            truncMeta.textContent = data.warning || "章节过长，内容已截断";
+            var summaryCard = document.querySelector("#jl-panel-summary .jl-card");
+            if (summaryCard) summaryCard.appendChild(truncMeta);
+          }
 
-      const result = normalizeResult(payload.data);
-      renderResult(result);
+          if (data.cached) {
+            var summaryEl = document.getElementById("jl-summary");
+            var meta = document.createElement("div");
+            meta.className = "jl-meta";
+            meta.textContent = "已命中缓存，本次未消耗额度。";
+            summaryEl.parentElement.insertBefore(meta, summaryEl);
+          }
 
-      // 长文本截断提醒
-      if (payload.data.truncated) {
-        var truncMeta = document.createElement("div");
-        truncMeta.className = "jl-meta";
-        truncMeta.style.cssText = "background:#FFF8E1;color:#E65100";
-        truncMeta.textContent = payload.data.warning || "章节过长，内容已截断";
-        var summaryCard = document.querySelector("#jl-panel-summary .jl-card");
-        if (summaryCard) summaryCard.appendChild(truncMeta);
-      }
+          if (data.book_id) {
+            var prevBookId = _currentBookId;
+            _currentBookId = data.book_id;
+            _currentBookTitle = bookTitle || chapterTitle || "当前书籍";
+            var tag = document.getElementById("jl-book-tag");
+            if (tag) tag.textContent = "当前：" + _currentBookTitle;
+            updateQABookTag();
+            if (prevBookId !== _currentBookId) {
+              _chatBookId = _currentBookId;
+              _chatHistory = [];
+              loadChatHistory();
+              renderChatHistory();
+              var oldSection = document.getElementById("jl-history-section");
+              if (oldSection) oldSection.remove();
+              var qContainer = document.getElementById("jl-suggested-questions");
+              if (qContainer) qContainer.innerHTML = "";
+              var qaTag = document.getElementById("jl-qa-book-tag");
+              if (qaTag) qaTag.textContent = "";
+            }
+            loadAnalysisHistory();
+          }
 
-      // 存内存变量
-      if (payload.data.book_id) {
-        var prevBookId = _currentBookId;
-        _currentBookId = payload.data.book_id;
-        _currentBookTitle = bookTitle || chapterTitle || "当前书籍";
-        const tag = document.getElementById("jl-book-tag");
-        if (tag) tag.textContent = "当前：" + _currentBookTitle;
-        updateQABookTag();
-        // 切书了 → 换聊天历史 + 清除旧历史列表
-        if (prevBookId !== _currentBookId) {
-          _chatBookId = _currentBookId;
-          _chatHistory = [];
-          loadChatHistory();
-          renderChatHistory();
-          var oldSection = document.getElementById("jl-history-section");
-          if (oldSection) oldSection.remove();
-          // 切书后清空推荐问题和记忆标签，强制重新生成
-          var qContainer = document.getElementById("jl-suggested-questions");
-          if (qContainer) qContainer.innerHTML = "";
-          var qaTag = document.getElementById("jl-qa-book-tag");
-          if (qaTag) qaTag.textContent = "";
+          if (_currentBookId) {
+            checkForeshadowingResult(_currentBookId);
+          }
+
+          localStorage.setItem(storageKey(), JSON.stringify(result));
+        },
+        onError: function(message) {
+          setText("#jl-summary", message);
+          // 额度不足 → 签到提醒
+          if (message.indexOf("额度不足") !== -1) {
+            setText("#jl-summary", message + "\n\n💡 每天签到免费领 8 次额度，打开插件弹窗即可自动领取");
+          }
         }
-
-        // 加载分析历史（服务端数据，跨设备同步）
-        loadAnalysisHistory();
-      }
-
-      if (payload.data.cached) {
-        const summaryEl = document.getElementById("jl-summary");
-        const meta = document.createElement("div");
-        meta.className = "jl-meta";
-        meta.textContent = "已命中缓存，本次未消耗额度。";
-        summaryEl.parentElement.insertBefore(meta, summaryEl);
-      }
-
-      // 自动检测伏笔回收
-      if (_currentBookId) {
-        checkForeshadowingResult(_currentBookId);
-      }
-
-      localStorage.setItem(storageKey(), JSON.stringify(result));
+      });
     } catch (error) {
       var errMsg = error.message || "分析失败，请稍后再试。联系客服 QQ：2313370765";
 
-      // 额度不足 → 签到提醒
       if (errMsg.indexOf("额度不足") !== -1) {
         errMsg += "\n\n💡 每天签到免费领 8 次额度，打开插件弹窗即可自动领取";
       }
@@ -924,7 +964,6 @@
         summaryCard.appendChild(retryBtn);
       }
     } finally {
-      clearInterval(statusTimer);
       isRunning = false;
       runBtn.disabled = false;
       runBtn.textContent = "重新分析";

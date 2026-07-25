@@ -16,7 +16,7 @@ import jwt
 import requests as http_requests
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from services.ai_service import analyze_text
@@ -1037,6 +1037,208 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
         response_data["truncated"] = True
         response_data["warning"] = f"章节过长（{len(req.text)}字），仅分析了前{len(analysis_text)}字"
     return ok(response_data)
+
+
+@app.post("/api/analyze/stream")
+async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
+    """流式分析章节（SSE）：实时推送 AI 分析进度和结果"""
+    from services.ai_service import analyze_text_stream
+
+    # 限流
+    allowed, retry = _check_rate_limit("analyze", user=user)
+    if not allowed:
+        return fail(f"请求太频繁，请 {retry} 秒后再试")
+
+    now = time.time()
+    last = user_last_request.get(user, 0)
+    if now - last < 2:
+        return fail("请求太频繁了，请稍后再试")
+    user_last_request[user] = now
+    _cleanup_user_last_request()
+
+    content_hash = text_hash(req.text)
+    spoiler_free = 1 if req.spoiler_free else 0
+
+    # 书籍匹配
+    book_id = None
+    with get_db() as conn:
+        if req.book_title and req.book_title.strip():
+            book = conn.execute(
+                "SELECT id FROM books WHERE username=? AND title=?",
+                (user, req.book_title.strip()),
+            ).fetchone()
+            if book:
+                book_id = book["id"]
+            else:
+                cur = conn.execute(
+                    "INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (user, req.book_title.strip(), req.author or "", req.source_url or "", int(time.time())),
+                )
+                book_id = cur.lastrowid
+        if not book_id and req.source_url:
+            m = re.match(r"(https?://[^/]+(/[^/]+/[^/]+/)?)", req.source_url)
+            url_prefix = m.group(1) if m else req.source_url[:60]
+            book = conn.execute(
+                "SELECT id FROM books WHERE username=? AND source_url_pattern=?",
+                (user, url_prefix),
+            ).fetchone()
+            if book:
+                book_id = book["id"]
+            else:
+                cur = conn.execute(
+                    "INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (user, req.chapter_title or url_prefix, req.author or "", url_prefix, int(time.time())),
+                )
+                book_id = cur.lastrowid
+
+        # 缓存检查
+        cached = conn.execute(
+            """SELECT result_json FROM analyses
+               WHERE username=? AND text_hash=? AND detail_level=? AND spoiler_free=?""",
+            (user, content_hash, req.detail_level, spoiler_free),
+        ).fetchone()
+        if cached:
+            # 缓存命中：不扣额，直接返回 done 事件
+            async def cached_stream():
+                resp = {"type": "done", "data": {"result": json.loads(cached["result_json"]), "cached": True, "book_id": book_id}}
+                yield f"data: {json.dumps(resp, ensure_ascii=False)}\n\n"
+            return StreamingResponse(cached_stream(), media_type="text/event-stream")
+
+        # 自动签到 + 扣额度
+        bonus = try_daily_bonus(conn, user)
+        row = conn.execute("SELECT credits FROM users WHERE username=?", (user,)).fetchone()
+        if not row or row["credits"] <= 0:
+            if bonus > 0:
+                return fail("额度不足，但今日签到已领取 8 次！刷新页面后重试")
+            return fail("额度不足，每日签到可领 8 次免费额度，打开插件弹窗自动领取")
+        conn.execute("UPDATE users SET credits = credits - 1 WHERE username=? AND credits > 0", (user,))
+        log_usage(conn, user, "analyze", f"分析章节: {req.chapter_title}", -1)
+
+    # 文本截断
+    analysis_text = req.text
+    truncated = False
+    MAX_CHARS = 12000
+    if len(analysis_text) > MAX_CHARS:
+        truncated = True
+        cut_point = analysis_text.rfind("\n", 0, MAX_CHARS)
+        if cut_point < MAX_CHARS // 2:
+            cut_point = MAX_CHARS
+        analysis_text = analysis_text[:cut_point] + "\n\n[提示：章节过长，已截取前 {:.0f}% 内容进行分析]".format(
+            cut_point / len(req.text) * 100
+        )
+
+    async def event_stream():
+        try:
+            for event_type, data in analyze_text_stream(
+                analysis_text, req.chapter_title,
+                detail_level=req.detail_level, spoiler_free=req.spoiler_free,
+            ):
+                if event_type == "done":
+                    result = data["result"]
+                    # 保存分析结果
+                    try:
+                        with get_db() as db_conn:
+                            db_conn.execute(
+                                """INSERT OR REPLACE INTO analyses (
+                                    username, book_id, chapter_title, chapter_index, source_url,
+                                    text_hash, detail_level, spoiler_free, result_json, created_at
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (user, book_id, req.chapter_title, req.chapter_index,
+                                 req.source_url, content_hash, req.detail_level, spoiler_free,
+                                 json.dumps(result, ensure_ascii=False), int(time.time())),
+                            )
+                            if book_id:
+                                db_conn.execute(
+                                    "UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?",
+                                    (book_id, book_id),
+                                )
+                    except Exception:
+                        pass  # 保存失败不阻断流
+
+                    resp = {"type": "done", "data": {"result": result, "cached": False, "book_id": book_id}}
+                    if truncated:
+                        resp["data"]["truncated"] = True
+                        resp["data"]["warning"] = f"章节过长（{len(req.text)}字），仅分析了前{len(analysis_text)}字"
+                    yield f"data: {json.dumps(resp, ensure_ascii=False)}\n\n"
+
+                elif event_type == "error":
+                    # 分析失败，退款
+                    try:
+                        with get_db() as db_conn:
+                            db_conn.execute("UPDATE users SET credits = credits + 1 WHERE username=?", (user,))
+                    except Exception:
+                        pass
+                    yield f"data: {json.dumps({'type': 'error', 'message': data['message']}, ensure_ascii=False)}\n\n"
+
+                else:
+                    yield f"data: {json.dumps({'type': event_type, **data}, ensure_ascii=False)}\n\n"
+        except Exception as exc:
+            try:
+                with get_db() as db_conn:
+                    db_conn.execute("UPDATE users SET credits = credits + 1 WHERE username=?", (user,))
+            except Exception:
+                pass
+            yield f"data: {json.dumps({'type': 'error', 'message': friendly_error(exc)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/analyze/guest/stream")
+async def analyze_guest_stream(req: GuestAnalyzeRequest, http_req: Request):
+    """免登录流式试用分析（SSE）"""
+    from services.ai_service import analyze_text_stream
+
+    guest_id = req.guest_id.strip()
+    guest_username = f"guest:{guest_id}"
+    client_ip = http_req.client.host if http_req.client else "unknown"
+
+    allowed, retry = _check_rate_limit("guest_analyze", ip=client_ip)
+    if not allowed:
+        return fail(f"试用请求太频繁，请 {retry} 秒后再试")
+
+    with get_db() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) as cnt FROM usage_logs WHERE username=? AND action='guest_analyze'",
+            (guest_username,),
+        ).fetchone()["cnt"]
+
+    if count >= 3:
+        return fail("免费试用次数已用完（3次），注册即送 10 次额度，每天签到再领 8 次！点击浏览器工具栏的 📖 图标注册即可。")
+
+    analysis_text = req.text
+    truncated = False
+    MAX_CHARS = 12000
+    if len(analysis_text) > MAX_CHARS:
+        truncated = True
+        cut_point = analysis_text.rfind("\n", 0, MAX_CHARS)
+        if cut_point < MAX_CHARS // 2:
+            cut_point = MAX_CHARS
+        analysis_text = analysis_text[:cut_point] + "\n\n[提示：章节过长，已截取前 {:.0f}% 内容进行分析]".format(
+            cut_point / len(req.text) * 100
+        )
+
+    async def event_stream():
+        for event_type, data in analyze_text_stream(
+            analysis_text, req.chapter_title,
+            detail_level=req.detail_level, spoiler_free=req.spoiler_free,
+        ):
+            if event_type == "done":
+                try:
+                    with get_db() as db_conn:
+                        log_usage(db_conn, guest_username, "guest_analyze", f"试用分析: {req.chapter_title}", 0)
+                except Exception:
+                    pass
+                remaining = 2 - count
+                resp = {"type": "done", "data": {"result": data["result"], "cached": False, "guest_uses_remaining": remaining}}
+                if truncated:
+                    resp["data"]["truncated"] = True
+                yield f"data: {json.dumps(resp, ensure_ascii=False)}\n\n"
+            elif event_type == "error":
+                yield f"data: {json.dumps({'type': 'error', 'message': data['message']}, ensure_ascii=False)}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': event_type, **data}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.post("/api/feedback")
