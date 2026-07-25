@@ -617,12 +617,6 @@
 
   async function runGuestAnalyze(API) {
     if (isRunning) return;
-    var now = Date.now();
-    if (now - lastCallTime < MIN_INTERVAL_MS) {
-      setText("#jl-summary", "操作太频繁了，稍等几秒再试。");
-      return;
-    }
-    lastCallTime = now;
 
     var usageCount = getGuestUsage();
     if (usageCount >= 3) {
@@ -769,18 +763,19 @@
   async function runAnalyze() {
     if (isRunning) return;
     const now = Date.now();
+    const API = await getAPI();
+    const token = await getToken();
+    // 免登录试用：跳过冷却时间，服务端已有限流
+    if (!token) {
+      await runGuestAnalyze(API);
+      return;
+    }
+
     if (now - lastCallTime < MIN_INTERVAL_MS) {
       setText("#jl-summary", "操作太频繁了，稍等几秒再试。");
       return;
     }
     lastCallTime = now;
-
-    const API = await getAPI();
-    const token = await getToken();
-    if (!token) {
-      await runGuestAnalyze(API);
-      return;
-    }
 
     const text = getChapterText();
     if (text.length < 80) {
