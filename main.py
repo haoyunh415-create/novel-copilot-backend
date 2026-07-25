@@ -1300,8 +1300,7 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                 # 详情后出
                 details = df.result()
                 result = {**summary, **details}
-                if not result.get("summary"):
-                    result["summary"] = summary.get("summary", "")
+                result["summary"] = summary.get("summary", "")  # 始终用摘要专用调用结果
 
                 try:
                     with get_db() as db_conn:
@@ -1358,8 +1357,7 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
 
                 details = df.result()
                 result = {**summary, **details}
-                if not result.get("summary"):
-                    result["summary"] = summary.get("summary", "")
+                result["summary"] = summary.get("summary", "")  # 始终用摘要专用调用结果
 
                 try:
                     with get_db() as db_conn:

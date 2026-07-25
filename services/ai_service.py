@@ -235,10 +235,11 @@ JSON 格式：{{{{"characters":[{{{{"name":"","note":""}}}}],"foreshadowing":[{{
     try:
         raw = payload["choices"][0]["message"]["content"]
         parsed = _extract_json(raw)
-        return _normalize_result({**parsed, "summary": ""}, raw)
+        result = _normalize_result({**parsed, "summary": " "}, raw)
+        result["summary"] = ""  # 摘要由 progressive 端点从 summary 调用填充
+        return result
     except Exception:
-        clean = re.sub(r"```[\s\S]*?```", "", payload["choices"][0]["message"]["content"]).strip()
-        return _normalize_result({"summary": "", "characters": [], "foreshadowing": [], "terms": [], "graph": {"nodes": [], "edges": []}}, clean, degraded=True)
+        return {"summary": "", "characters": [], "foreshadowing": [], "terms": [], "graph": {"nodes": [], "edges": []}}
 
 
 def analyze_text_stream(text: str, chapter_title: str, detail_level: str = "standard", spoiler_free: bool = True):
