@@ -198,7 +198,14 @@
     return lines.slice(0, 150).join("\n");
   }
 
+  var _cachedText = null;
+  var _cachedTextUrl = null;
+
   function getChapterText() {
+    // 缓存：同一页面重复分析时直接用缓存，避免触发起点反爬
+    if (_cachedText && _cachedTextUrl === location.href) {
+      return _cachedText;
+    }
     // 移动端多章拼接修复：先尝试按章节边界截断
     var boundaryText = extractByChapterBoundary();
     if (boundaryText && boundaryText.length >= 80) return boundaryText;
@@ -238,7 +245,9 @@
       bestText = texts.join("\n");
     }
     const lines = bestText.split("\n").filter((l) => l.length > 3);
-    return lines.slice(0, 150).join("\n");
+    _cachedText = lines.slice(0, 150).join("\n");
+    _cachedTextUrl = location.href;
+    return _cachedText;
   }
 
   function getBookTitle() {

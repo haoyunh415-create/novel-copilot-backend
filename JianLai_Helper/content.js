@@ -31,7 +31,15 @@
     return title || "未命名章节";
   }
 
+  var _cachedText = null;
+  var _cachedTextUrl = null;
+
   function getChapterText() {
+    // 缓存：同一页面重复分析时直接用缓存，避免触发起点反爬
+    if (_cachedText && _cachedTextUrl === location.href) {
+      return _cachedText;
+    }
+
     const containerSelectors = [
       "#content", "#chaptercontent", "#ChapterContent", "#txt",
       ".read-content", ".main-text-wrap", ".chapter-content",
@@ -58,7 +66,9 @@
       bestText = texts.join("\n");
     }
     const lines = bestText.split("\n").filter((l) => l.length > 3);
-    return lines.slice(0, 150).join("\n");
+    _cachedText = lines.slice(0, 150).join("\n");
+    _cachedTextUrl = location.href;
+    return _cachedText;
   }
 
   function getBookTitle() {

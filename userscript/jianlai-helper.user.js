@@ -189,7 +189,11 @@
     return lines.slice(0, 150).join("\n");
   }
 
+  var _cachedText = null;
+  var _cachedTextUrl = null;
+
   function getChapterText() {
+    if (_cachedText && _cachedTextUrl === location.href) { return _cachedText; }
     // 移动端多章拼接修复：先尝试按章节边界截断
     var boundaryText = extractByChapterBoundary();
     if (boundaryText && boundaryText.length >= 80) return boundaryText;
@@ -228,8 +232,9 @@
         .filter((t) => t.length > 8);
       bestText = texts.join("\n");
     }
-    const lines = bestText.split("\n").filter((l) => l.length > 3);
-    return lines.slice(0, 150).join("\n");
+    _cachedText = bestText.split("\n").filter(function(l){return l.length>3}).slice(0,150).join("\n");
+    _cachedTextUrl = location.href;
+    return _cachedText;
   }
 
   function getBookTitle() {
