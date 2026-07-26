@@ -65,6 +65,16 @@
         .filter((t) => t.length > 8);
       bestText = texts.join("\n");
     }
+    // 质量检测：中文占比太低说明是乱码/混淆，返回空让上层提示用户
+    var chineseChars = (bestText.match(/[一-鿿㐀-䶿]/g) || []).length;
+    var ratio = bestText.length > 0 ? chineseChars / bestText.length : 0;
+    if (ratio < 0.15 && bestText.length > 50) {
+      console.warn("[鉴来助手] 正文疑似混淆/乱码，中文占比 " + (ratio * 100).toFixed(1) + "%");
+      _cachedText = "";
+      _cachedTextUrl = location.href;
+      return "";
+    }
+
     const lines = bestText.split("\n").filter((l) => l.length > 3);
     _cachedText = lines.slice(0, 150).join("\n");
     _cachedTextUrl = location.href;
@@ -744,7 +754,7 @@
 
     var text = getChapterText();
     if (text.length < 80) {
-      setText("#jl-summary", "没有识别到足够的正文内容。");
+      setText("#jl-summary", "⚠️ 本章正文解析失败，可能是起点反爬保护。\n\n等一下再试，或试试别的章节/网站。");
       return;
     }
 
@@ -890,7 +900,7 @@
 
     const text = getChapterText();
     if (text.length < 80) {
-      setText("#jl-summary", "没有识别到足够的正文内容。");
+      setText("#jl-summary", "⚠️ 本章正文解析失败，可能是起点反爬保护。\n\n等一下再试，或试试别的章节/网站。");
       return;
     }
 
