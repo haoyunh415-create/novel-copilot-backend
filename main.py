@@ -454,6 +454,26 @@ def google_verify():
     return HTMLResponse(content="google-site-verification: google59b898fc46d5abd2.html")
 
 
+@app.get("/robots.txt")
+def robots():
+    """搜索引擎爬虫规则"""
+    import os as _os
+    file_path = _os.path.join(_os.path.dirname(__file__), "robots.txt")
+    if _os.path.isfile(file_path):
+        return FileResponse(file_path)
+    raise HTTPException(status_code=404)
+
+
+@app.get("/sitemap.xml")
+def sitemap():
+    """网站地图"""
+    import os as _os
+    file_path = _os.path.join(_os.path.dirname(__file__), "sitemap.xml")
+    if _os.path.isfile(file_path):
+        return FileResponse(file_path, media_type="application/xml")
+    raise HTTPException(status_code=404)
+
+
 @app.get("/static/{filename:path}")
 def serve_static(filename: str):
     """提供静态文件下载（插件 ZIP 等）"""
