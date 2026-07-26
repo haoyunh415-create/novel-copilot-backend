@@ -145,10 +145,10 @@ def analyze_text(text: str, chapter_title: str, detail_level: str = "standard", 
 
 输出要求（严格 JSON，不能有任何其他内容）：
 1. {summary_rule}
-2. characters：列出本章出现/提及的 3-8 个关键人物。每人必须包含 name（名称）和 note（本章中的角色/动向，20字以内）
+2. characters：列出本章正文**明确出现**的 1-8 个关键人物。**只提取正文中能直接找到名字的人物，绝对不要凭经验或常识推测、补充、编造**。每人必须包含 name（名称）和 note（本章中的角色/动向，20字以内）。如果正文为乱码或无法提取人物，返回空数组 []
 3. foreshadowing：列出 0-5 条疑似伏笔或需要留意的线索。每条包含 clue（线索描述）、reason（为什么是伏笔，30字以内）、confidence（0-100 的可信度评分）
 4. terms：列出 0-5 个读者需要记住的地名、物品、势力、修炼术语。每条包含 term（术语）和 meaning（含义解释）
-5. graph.nodes：3-8 个关键人物节点，每人用 id、label、level（主角=core，其他=normal）
+5. graph.nodes：1-8 个关键人物节点（与 characters 保持一致），每人用 id、label、level（主角=core，其他=normal）
 6. graph.edges：人物之间的关系边，用 from、to、label（关系描述，如"师徒""盟友""敌对"）
 
 严格按此 JSON 结构返回：
@@ -221,7 +221,7 @@ def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = Tru
 
     prompt = f"""章节标题：{chapter_title}。{spoiler_rule}
 分析以下内容，严格按 JSON 返回：
-- characters：2-5 个关键人物（name + note 10字以内）
+- characters：1-5 个关键人物（name + note 10字以内）。只提取正文中明确出现的人物，不要编造。正文为乱码则返回空数组
 - foreshadowing：0-3 条伏笔线索（clue + reason 15字以内 + confidence 0-100）
 - terms：0-3 个关键术语（term + meaning）
 - graph：人物关系 nodes（id、label、level）+ edges（from、to、label）
@@ -273,10 +273,10 @@ def analyze_text_stream(text: str, chapter_title: str, detail_level: str = "stan
 
 输出要求（严格 JSON，不能有任何其他内容）：
 1. {summary_rule}
-2. characters：列出本章出现/提及的 3-8 个关键人物。每人必须包含 name（名称）和 note（本章中的角色/动向，20字以内）
+2. characters：列出本章正文**明确出现**的 1-8 个关键人物。**只提取正文中能直接找到名字的人物，绝对不要凭经验或常识推测、补充、编造**。每人必须包含 name（名称）和 note（本章中的角色/动向，20字以内）。如果正文为乱码或无法提取人物，返回空数组 []
 3. foreshadowing：列出 0-5 条疑似伏笔或需要留意的线索。每条包含 clue（线索描述）、reason（为什么是伏笔，30字以内）、confidence（0-100 的可信度评分）
 4. terms：列出 0-5 个读者需要记住的地名、物品、势力、修炼术语。每条包含 term（术语）和 meaning（含义解释）
-5. graph.nodes：3-8 个关键人物节点，每人用 id、label、level（主角=core，其他=normal）
+5. graph.nodes：1-8 个关键人物节点（与 characters 保持一致），每人用 id、label、level（主角=core，其他=normal）
 6. graph.edges：人物之间的关系边，用 from、to、label（关系描述，如"师徒""盟友""敌对"）
 
 严格按此 JSON 结构返回：
