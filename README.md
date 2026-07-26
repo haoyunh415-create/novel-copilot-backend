@@ -1,81 +1,66 @@
-# 鉴来助手 —— 追更不迷路的 AI 阅读助手
+# 鉴来助手 · 追更不迷路的 AI 阅读助手
 
-浏览器插件，AI 自动追踪小说伏笔、生成人物关系图、无剧透前情提要。长篇追更党必备。
+[![Chrome Web Store](https://img.shields.io/badge/Chrome-已上线-4285F4?logo=googlechrome)](https://chromewebstore.google.com/detail/鉴来助手-小说-ai-伏笔雷达/ahahdepghanijblcddabfpeipbclobil)
+[![Greasy Fork](https://img.shields.io/badge/Greasy%20Fork-安装-success?logo=greasyfork)](https://greasyfork.org/zh-CN/scripts/587834)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Platform](https://img.shields.io/badge/平台-25%2B-orange)](https://jianla.xyz)
 
-[![国内可访问](https://img.shields.io/badge/🌏-国内可访问-C75B39)](https://novel-copilot-backend.pages.dev)
+打开小说页面，AI 自动追踪伏笔、生成人物关系图、无剧透前情提要。25+ 平台通用，免登录试用。
+
+**官网：[jianla.xyz](https://jianla.xyz)**
 
 ---
 
-## ✨ 功能一览
+## 快速安装
+
+| 方式 | 适合 | 链接 |
+|------|------|------|
+| 🌐 Chrome 商店 | Chrome/Edge 用户 | [安装](https://chromewebstore.google.com/detail/鉴来助手-小说-ai-伏笔雷达/ahahdepghanijblcddabfpeipbclobil) |
+| 📦 直接下载 | 国内用户免梯子 | [v2.2.2](https://jianla.xyz/static/jianlai-helper-v2.2.2.zip) |
+| 📜 油猴脚本 | 手机/桌面通用 | [标准版](https://jianla.xyz/static/jianlai-helper.user.js) · [Greasy Fork](https://greasyfork.org/zh-CN/scripts/587834) · [手机版](https://jianla.xyz/static/jianlai-helper-alook.user.js) |
+
+安装后打开任意小说章节 → 点右下角按钮 → AI 自动分析。
+
+---
+
+## 功能介绍
 
 | 功能 | 说明 |
 |------|------|
-| 📝 **智能章节摘要** | 每章自动提炼前情提要，支持简洁/标准/详细三种粒度 |
-| 🕵️ **伏笔雷达** | AI 自动标记疑似伏笔，标注可信度，跨章追踪回收状态 |
-| 👥 **人物关系图谱** | 自动生成人物关系网，核心角色高亮 |
-| 💬 **无剧透问答** | 基于已读记忆回答，绝不剧透后文 |
-| 🔒 **隐私保护** | 不保存小说原文，分析缓存基于文本哈希 |
+| 📝 智能摘要 | 每章提炼前情提要，简洁/标准/详细三种粒度，摘要秒出 |
+| 🕵️ 伏笔雷达 | AI 标记线索+可信度评分，跨章追踪（开放中/推进中/已回收） |
+| 👥 人物关系图 | 自动生成关系网络，核心角色高亮，几百章也不脸盲 |
+| 💬 无剧透问答 | 基于已读记忆回答，绝不偷看后面章节 |
+| 🆓 免登录试用 | 不注册也能用 3 次，注册送 10 次 · 每日签到 +8 次 |
+| ⚡ 渐进式分析 | 摘要先出（约 5 秒），人物和伏笔随后加载 |
+
+支持平台：起点 · 纵横 · 番茄 · 17K · 晋江 · 七猫 · 69书吧 · 笔趣阁等 **25+ 小说网站**。
 
 ---
 
-## 🚀 托管版（即将推出）
+## 技术栈
 
-> 目前正在收集用户反馈，如果需求量大，将推出**即开即用的托管版**：
-> - 不需要自己搭服务器
-> - 不需要申请 API Key
-> - Chrome Web Store 一键安装
-> - 注册即用，每天免费额度
+**后端：** Python · FastAPI · DeepSeek API · SQLite · Nginx
 
-**如果你想用托管版，请给这个仓库点个 ⭐ Star，人数够了我就开搞！**
+**前端：** Vanilla JS (Chrome Extension MV3) · vis-network · 油猴脚本三版本
+
+**部署：** 阿里云 · Ubuntu 22.04 · Let's Encrypt SSL
 
 ---
 
-## 🛠️ 自行部署（开发者）
-
-等不及托管版？你可以用自己的 DeepSeek API Key 自建，成本极低（约 ¥0.001/次分析）。
-
-### 环境要求
-
-- Python 3.10+
-- Chrome 浏览器
-- [DeepSeek API Key](https://platform.deepseek.com/api_keys)（免费注册，新用户送额度）
-
-### 安装步骤
+## 自行开发
 
 ```bash
-# 1. 克隆项目
 git clone https://github.com/haoyunh415-create/novel-copilot-backend.git
 cd novel-copilot-backend
-
-# 2. 安装依赖
-python -m venv venv
-venv\Scripts\activate          # Windows
-# source venv/bin/activate     # Mac/Linux
 pip install -r requirements.txt
-
-# 3. 配置 API Key
-cp .env.example .env
-# 编辑 .env，填入你的 DeepSeek API Key
-
-# 4. 启动后端
+cp .env.example .env   # 填入 DeepSeek API Key
 python -m uvicorn main:app --host 127.0.0.1 --port 8000
-
-# 5. 加载插件
-# Chrome → chrome://extensions → 开发者模式 → 加载已解压的扩展程序
-# 选择 JianLai_Helper 文件夹
+# Chrome → chrome://extensions → 开发者模式 → 加载 JianLai_Helper 文件夹
 ```
 
-### 开机自启（Windows）
-
-双击 `start_server.bat` 即可。将 `start_server.vbs` 的快捷方式放入启动文件夹（`Win+R` → `shell:startup`），每次开机自动后台运行。
-
 ---
 
-## 📄 许可证
+## License
 
-MIT License
-
----
-
-**⭐ 想要托管版？点个 Star 让我知道！**
-
+MIT · 代码开源，欢迎 PR 和 Star ⭐
