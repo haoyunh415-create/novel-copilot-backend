@@ -26,3 +26,12 @@ Thumbs.db
 
 # 测试文件
 test_token.txt
+
+# 旧版插件包 (只保留最新)
+jianlai-helper-v2.1*.zip
+jianlai-helper-v2.2.0*.zip
+jianlai-helper-v2.2.1.zip
+
+# Claude 内部文件
+.superpowers/
+.ruff_cache/
