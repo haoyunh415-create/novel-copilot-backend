@@ -2207,6 +2207,110 @@ def track_stats(_admin=Depends(verify_admin)):
     })
 
 
+@app.get("/api/admin/stats")
+def admin_stats(_admin=Depends(verify_admin)):
+    """管理后台统计仪表盘数据"""
+    import time as _time
+    now = int(_time.time())
+    day_ago = now - 86400
+    week_ago = now - 86400 * 7
+    month_ago = now - 86400 * 30
+
+    with get_db() as conn:
+        dau = conn.execute(
+            "SELECT COUNT(DISTINCT username) FROM usage_logs WHERE created_at >= ?",
+            (day_ago,)
+        ).fetchone()[0]
+
+        wau = conn.execute(
+            "SELECT COUNT(DISTINCT username) FROM usage_logs WHERE created_at >= ?",
+            (week_ago,)
+        ).fetchone()[0]
+
+        total_users = conn.execute(
+            "SELECT COUNT(*) FROM users"
+        ).fetchone()[0]
+
+        today_analyses = conn.execute(
+            "SELECT COUNT(*) FROM usage_logs WHERE created_at >= ? AND action IN ('analyze', 'guest_analyze')",
+            (day_ago,)
+        ).fetchone()[0]
+
+        guest_trial_users = conn.execute(
+            "SELECT COUNT(DISTINCT username) FROM usage_logs WHERE action='guest_analyze'"
+        ).fetchone()[0]
+
+        guest_to_reg = conn.execute(
+            """
+            SELECT COUNT(DISTINCT u.username) FROM users u
+            WHERE EXISTS (
+                SELECT 1 FROM usage_logs ul
+                WHERE ul.action='guest_analyze'
+                AND 'guest:' || u.username = ul.username
+            )
+            """
+        ).fetchone()[0]
+        guest_conversion = round(guest_to_reg / guest_trial_users * 100, 1) if guest_trial_users > 0 else 0
+
+        feature_dist = {}
+        for action, label in [
+            ("analyze", "章节分析"), ("ask", "问答"),
+            ("full_report", "全书复盘"), ("review", "追更回顾"),
+            ("guest_analyze", "免登录试用"),
+        ]:
+            cnt = conn.execute(
+                "SELECT COUNT(*) FROM usage_logs WHERE action=? AND created_at >= ?",
+                (action, month_ago),
+            ).fetchone()[0]
+            if cnt > 0:
+                feature_dist[label] = cnt
+
+        total_requests = conn.execute(
+            "SELECT COUNT(*) FROM usage_logs WHERE created_at >= ?",
+            (week_ago,)
+        ).fetchone()[0]
+        error_count = conn.execute(
+            "SELECT COUNT(*) FROM usage_logs WHERE created_at >= ? AND (action='error' OR detail LIKE '%失败%' OR detail LIKE '%错误%')",
+            (week_ago,)
+        ).fetchone()[0]
+        error_rate = round(error_count / total_requests * 100, 1) if total_requests > 0 else 0
+
+        platforms = {}
+        rows = conn.execute(
+            "SELECT source_url_pattern FROM books WHERE source_url_pattern != ''"
+        ).fetchall()
+        for row in rows:
+            url = row["source_url_pattern"]
+            import re as _re
+            m = _re.match(r"https?://(?:www\.)?([^/.]+)", url)
+            domain = m.group(1) if m else "other"
+            platforms[domain] = platforms.get(domain, 0) + 1
+
+        total_reg = conn.execute("SELECT COUNT(*) FROM users WHERE created_at > 0").fetchone()[0]
+        active_7d = conn.execute(
+            "SELECT COUNT(DISTINCT username) FROM usage_logs WHERE created_at >= ? AND username NOT LIKE 'guest:%'",
+            (week_ago,)
+        ).fetchone()[0]
+        retention_d7 = round(active_7d / total_reg * 100, 1) if total_reg > 0 else 0
+
+    return ok({
+        "dau": dau,
+        "wau": wau,
+        "total_users": total_users,
+        "today_analyses": today_analyses,
+        "guest_trial_users": guest_trial_users,
+        "guest_to_registered": guest_to_reg,
+        "guest_conversion": guest_conversion,
+        "feature_distribution": feature_dist,
+        "error_rate": error_rate,
+        "total_requests_7d": total_requests,
+        "error_count_7d": error_count,
+        "platforms": platforms,
+        "retention_d7": retention_d7,
+        "generated_at": now,
+    })
+
+
 @app.get("/api/admin/users")
 def admin_list_users(_req: Request = None, _admin=Depends(verify_admin)):
     """列出所有用户"""
