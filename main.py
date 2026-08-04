@@ -1256,11 +1256,24 @@ async def analyze_guest_stream(req: GuestAnalyzeRequest, http_req: Request):
     if not allowed:
         return fail(f"试用请求太频繁，请 {retry} 秒后再试")
 
+    content_hash = text_hash(req.text)
+    spoiler_int = 1 if req.spoiler_free else 0
+
     with get_db() as conn:
         count = conn.execute(
             "SELECT COUNT(*) as cnt FROM usage_logs WHERE username=? AND action='guest_analyze'",
             (guest_username,),
         ).fetchone()["cnt"]
+
+        # 全局缓存检查
+        cached = _get_cached_analysis(conn, content_hash, req.detail_level, spoiler_int)
+        if cached:
+            log_usage(conn, guest_username, "guest_analyze", f"试用分析(缓存命中): {req.chapter_title}", 0)
+            remaining = 2 - count
+            async def cached_stream():
+                resp = {"type": "done", "data": {"result": cached, "cached": True, "guest_uses_remaining": remaining}}
+                yield f"data: {json.dumps(resp, ensure_ascii=False)}\n\n"
+            return StreamingResponse(cached_stream(), media_type="text/event-stream")
 
     if count >= 3:
         return fail("免费试用次数已用完（3次），注册即送 10 次额度，每天签到再领 8 次！点击浏览器工具栏的 📖 图标注册即可。")
@@ -1283,13 +1296,15 @@ async def analyze_guest_stream(req: GuestAnalyzeRequest, http_req: Request):
             detail_level=req.detail_level, spoiler_free=req.spoiler_free,
         ):
             if event_type == "done":
+                result = data["result"]
                 try:
                     with get_db() as db_conn:
                         log_usage(db_conn, guest_username, "guest_analyze", f"试用分析: {req.chapter_title}", 0)
+                        _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
                 except Exception:
                     pass
                 remaining = 2 - count
-                resp = {"type": "done", "data": {"result": data["result"], "cached": False, "guest_uses_remaining": remaining}}
+                resp = {"type": "done", "data": {"result": result, "cached": False, "guest_uses_remaining": remaining}}
                 if truncated:
                     resp["data"]["truncated"] = True
                 yield f"data: {json.dumps(resp, ensure_ascii=False)}\n\n"
@@ -1407,13 +1422,24 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
     if not allowed:
         return fail(f"试用请求太频繁，请 {retry} 秒后再试")
 
-    with get_db() as conn:
-        count = conn.execute("SELECT COUNT(*) as cnt FROM usage_logs WHERE username=? AND action='guest_analyze'", (guest_username,)).fetchone()["cnt"]
-    if count >= 3:
-        return fail("免费试用次数已用完（3次），注册即送 10 次额度！")
-
     content_hash = text_hash(req.text)
     spoiler_int = 1 if req.spoiler_free else 0
+
+    with get_db() as conn:
+        count = conn.execute("SELECT COUNT(*) as cnt FROM usage_logs WHERE username=? AND action='guest_analyze'", (guest_username,)).fetchone()["cnt"]
+
+        # 全局缓存检查
+        cached = _get_cached_analysis(conn, content_hash, req.detail_level, spoiler_int)
+        if cached:
+            log_usage(conn, guest_username, "guest_analyze", f"试用分析(缓存命中): {req.chapter_title}", 0)
+            remaining = 2 - count
+            async def ce():
+                resp = {"type": "done", "data": {"result": cached, "cached": True, "guest_uses_remaining": remaining}}
+                yield f"data: {json.dumps(resp, ensure_ascii=False)}\n\n"
+            return StreamingResponse(ce(), media_type="text/event-stream")
+
+    if count >= 3:
+        return fail("免费试用次数已用完（3次），注册即送 10 次额度！")
 
     analysis_text = req.text
     if len(analysis_text) > 8000:
@@ -1471,17 +1497,23 @@ def analyze_guest(req: GuestAnalyzeRequest, http_req: Request):
     if not allowed:
         return fail(f"试用请求太频繁，请 {retry} 秒后再试")
 
-    # 检查试用次数
+    content_hash = text_hash(req.text)
+
+    # 检查试用次数 + 全局缓存
     with get_db() as conn:
         count = conn.execute(
             "SELECT COUNT(*) as cnt FROM usage_logs WHERE username=? AND action='guest_analyze'",
             (guest_username,),
         ).fetchone()["cnt"]
 
+        # 全局缓存检查
+        cached = _get_cached_analysis(conn, content_hash, req.detail_level, 1 if req.spoiler_free else 0)
+        if cached:
+            log_usage(conn, guest_username, "guest_analyze", f"试用分析(缓存命中): {req.chapter_title}", 0)
+            return ok({"result": cached, "cached": True, "guest_uses_remaining": 2 - count})
+
     if count >= 3:
         return fail("免费试用次数已用完（3次），注册即送 10 次额度，每天签到再领 8 次！点击浏览器工具栏的 📖 图标注册即可。")
-
-    content_hash = text_hash(req.text)
 
     # 超长文本智能截断
     analysis_text = req.text
