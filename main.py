@@ -2586,10 +2586,49 @@ th,td{padding:8px 10px;border:1px solid #e2d9d1;text-align:left}th{background:#e
 .badge.fulfilled{background:#e8f5e9;color:#2e7d32}
 #message{padding:8px;margin:8px 0;border-radius:6px;font-size:13px;display:none}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <h1>鉴来助手 · 管理后台</h1>
 <div id="message"></div>
+
+<div class="card">
+  <h2>📊 数据仪表盘 <span style="font-size:11px;color:#888;font-weight:400">（每60秒自动刷新）</span></h2>
+  <div class="row" id="stats-cards" style="gap:12px;margin-bottom:16px">
+    <div style="flex:1;min-width:120px;padding:14px;background:#f5f0eb;border-radius:8px;text-align:center">
+      <div style="font-size:28px;font-weight:800;color:#5d4037" id="stat-dau">-</div>
+      <div style="font-size:11px;color:#8d6e63">今日活跃 (DAU)</div>
+    </div>
+    <div style="flex:1;min-width:120px;padding:14px;background:#f5f0eb;border-radius:8px;text-align:center">
+      <div style="font-size:28px;font-weight:800;color:#5d4037" id="stat-wau">-</div>
+      <div style="font-size:11px;color:#8d6e63">7日活跃 (WAU)</div>
+    </div>
+    <div style="flex:1;min-width:120px;padding:14px;background:#f5f0eb;border-radius:8px;text-align:center">
+      <div style="font-size:28px;font-weight:800;color:#5d4037" id="stat-users">-</div>
+      <div style="font-size:11px;color:#8d6e63">总注册用户</div>
+    </div>
+    <div style="flex:1;min-width:120px;padding:14px;background:#f5f0eb;border-radius:8px;text-align:center">
+      <div style="font-size:28px;font-weight:800;color:#2e7d32" id="stat-analyses">-</div>
+      <div style="font-size:11px;color:#8d6e63">今日分析次数</div>
+    </div>
+    <div style="flex:1;min-width:120px;padding:14px;background:#f5f0eb;border-radius:8px;text-align:center">
+      <div style="font-size:28px;font-weight:800;color:#e65100" id="stat-conversion">-</div>
+      <div style="font-size:11px;color:#8d6e63">试用→注册转化</div>
+    </div>
+  </div>
+  <div class="row" style="gap:16px">
+    <div style="flex:1;min-width:300px">
+      <canvas id="chart-features" height="200"></canvas>
+    </div>
+    <div style="flex:1;min-width:300px">
+      <canvas id="chart-platforms" height="200"></canvas>
+    </div>
+  </div>
+  <div style="margin-top:12px;font-size:12px;color:#8d6e63">
+    错误率（7日）：<b id="stat-errors" style="color:#c62828">-</b> &nbsp;|&nbsp;
+    留存率 D7：<b id="stat-d7">-</b>
+  </div>
+</div>
 
 <div class="card">
 <h2>待处理订单</h2>
@@ -2639,8 +2678,67 @@ function msg(text, isErr) {
   setTimeout(() => el.style.display = "none", 4000);
 }
 
+var charts = {};
+
+function renderStats(data) {
+  document.getElementById("stat-dau").textContent = data.dau;
+  document.getElementById("stat-wau").textContent = data.wau;
+  document.getElementById("stat-users").textContent = data.total_users;
+  document.getElementById("stat-analyses").textContent = data.today_analyses;
+  document.getElementById("stat-conversion").textContent = data.guest_conversion + "%";
+  document.getElementById("stat-errors").textContent = data.error_rate + "% (" + data.error_count_7d + "/" + data.total_requests_7d + ")";
+  document.getElementById("stat-d7").textContent = data.retention_d7 + "%";
+
+  var featCtx = document.getElementById("chart-features").getContext("2d");
+  if (charts.features) charts.features.destroy();
+  var featLabels = Object.keys(data.feature_distribution);
+  var featValues = Object.values(data.feature_distribution);
+  charts.features = new Chart(featCtx, {
+    type: "doughnut",
+    data: {
+      labels: featLabels,
+      datasets: [{ data: featValues, backgroundColor: ["#5d4037","#8d6e63","#c75b39","#b8860b","#6b8e6b"] }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: "bottom", labels: { font: { size: 11 }, padding: 12 } },
+        title: { display: true, text: "功能使用分布（30天）", font: { size: 13 } }
+      }
+    }
+  });
+
+  var platCtx = document.getElementById("chart-platforms").getContext("2d");
+  if (charts.platforms) charts.platforms.destroy();
+  var platLabels = Object.keys(data.platforms);
+  var platValues = Object.values(data.platforms);
+  charts.platforms = new Chart(platCtx, {
+    type: "bar",
+    data: {
+      labels: platLabels,
+      datasets: [{ label: "用户数", data: platValues, backgroundColor: "#8d6e63" }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        title: { display: true, text: "平台分布", font: { size: 13 } }
+      },
+      scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+    }
+  });
+}
+
+async function loadStats() {
+  try {
+    var res = await fetchAPI("/api/admin/stats");
+    if (res.success) renderStats(res.data);
+  } catch (e) { console.error("Stats load failed:", e); }
+}
+
 async function loadData() {
   try {
+    loadStats();
     const [orderRes, userRes] = await Promise.all([
       fetchAPI("/api/admin/orders?status=pending"),
       fetchAPI("/api/admin/users")
@@ -2716,6 +2814,7 @@ async function quickRecharge(username, currentCredits) {
 }
 
 loadData();
+setInterval(loadData, 60000);
 </script>
 </body>
 </html>
