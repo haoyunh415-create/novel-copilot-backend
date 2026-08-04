@@ -234,6 +234,14 @@ input.invalid{border-color:var(--red);background:#FFF5F5}
 
   <div id="message"></div>
 
+    <!-- 最近分析 -->
+    <div id="recent-section" style="display:none">
+      <button id="toggle-recent" class="btn btn-outline" style="font-size:11px;min-height:30px">
+        📋 最近分析 <span id="recent-count" style="color:var(--brown-light)"></span>
+      </button>
+      <div id="recent-list" style="display:none;margin-top:6px;max-height:220px;overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:8px"></div>
+    </div>
+
   <!-- 高级设置（折叠） -->
   <div class="settings" style="text-align:center">
     <button id="toggle-advanced" class="btn btn-ghost" style="font-size:10px;color:#A1887F">⚙ 高级设置</button>

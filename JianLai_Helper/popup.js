@@ -40,6 +40,19 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll(".buy-plan-btn").forEach(function (btn) {
     btn.addEventListener("click", function () { buy(btn.dataset.plan); });
   });
+  var toggleRecentBtn = $("toggle-recent");
+  if (toggleRecentBtn) {
+    toggleRecentBtn.addEventListener("click", function () {
+      var list = $("recent-list");
+      if (list.style.display === "none" || list.style.display === "") {
+        list.style.display = "block";
+        toggleRecentBtn.innerHTML = '📋 收起 <span id="recent-count" style="color:var(--brown-light)">（' + (_recentBooks.length || 0) + ' 本书）</span>';
+      } else {
+        list.style.display = "none";
+        toggleRecentBtn.innerHTML = '📋 最近分析 <span id="recent-count" style="color:var(--brown-light)">（' + (_recentBooks.length || 0) + ' 本书）</span>';
+      }
+    });
+  }
   renderState();
 });
 
@@ -206,6 +219,7 @@ async function renderState() {
     }
     $("auth-box").style.display = "none";
     $("user-box").style.display = "block";
+    loadRecentAnalyses(token);
     showMessage("");
   } catch (error) {
     chrome.storage.local.remove(["token", "refreshToken", "username"]);
@@ -213,6 +227,61 @@ async function renderState() {
     $("user-box").style.display = "none";
     showMessage(error.message);
   }
+}
+
+var _recentBooks = [];
+
+async function loadRecentAnalyses(token) {
+  try {
+    var booksData = await apiFetch("/api/books", {
+      headers: { Authorization: "Bearer " + token }
+    });
+    var books = booksData.books || [];
+    _recentBooks = books;
+    if (books.length === 0) return;
+
+    $("recent-section").style.display = "block";
+    $("recent-count").textContent = "（" + books.length + " 本书）";
+
+    var allAnalyses = [];
+    for (var i = 0; i < Math.min(books.length, 5); i++) {
+      try {
+        var analysesData = await apiFetch("/api/books/" + books[i].id + "/analyses?limit=3", {
+          headers: { Authorization: "Bearer " + token }
+        });
+        var items = (analysesData.analyses || []).map(function(a) {
+          a._bookTitle = books[i].title;
+          a._bookId = books[i].id;
+          return a;
+        });
+        allAnalyses = allAnalyses.concat(items);
+      } catch (_) {}
+    }
+
+    if (allAnalyses.length === 0) return;
+    allAnalyses.sort(function(a, b) { return (b.created_at || 0) - (a.created_at || 0); });
+    allAnalyses = allAnalyses.slice(0, 10);
+
+    var html = "";
+    for (var j = 0; j < allAnalyses.length; j++) {
+      var a = allAnalyses[j];
+      var result = typeof a.result_json === "string" ? JSON.parse(a.result_json) : a.result_json;
+      var summary = (result && result.summary) ? result.summary.slice(0, 60) : "无摘要";
+      var time = a.created_at ? new Date(a.created_at * 1000).toLocaleDateString("zh-CN") : "";
+      html += '<div style="padding:8px 12px;border-bottom:1px solid #eee;font-size:11px">' +
+        '<div style="font-weight:600;color:#5d4037">' + escHtml(a.chapter_title || "未知章节") + '</div>' +
+        '<div style="color:#8d6e63;font-size:10px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escHtml(summary) + '</div>' +
+        '<div style="color:#b0a395;font-size:10px;margin-top:2px">' + escHtml(a._bookTitle) + ' · ' + time + '</div>' +
+      '</div>';
+    }
+    $("recent-list").innerHTML = html;
+  } catch (_) {}
+}
+
+function escHtml(str) {
+  var div = document.createElement("div");
+  div.appendChild(document.createTextNode(str || ""));
+  return div.innerHTML;
 }
 
 // ── 邮箱验证码登录（唯一登录方式）──
