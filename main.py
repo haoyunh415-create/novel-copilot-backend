@@ -307,6 +307,19 @@ def init_db():
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS analysis_cache (
+                text_hash TEXT NOT NULL,
+                detail_level TEXT NOT NULL,
+                spoiler_free INTEGER NOT NULL,
+                result_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(text_hash, detail_level, spoiler_free)
+            )
+            """
+        )
+
         # Refresh Token 表（记住登录状态，30 天有效）
         conn.execute(
             """
@@ -329,6 +342,23 @@ def init_db():
             )
             """
         )
+
+
+def _get_cached_analysis(conn, text_hash: str, detail_level: str, spoiler_free: int):
+    """从全局缓存读取分析结果。返回 dict 或 None。"""
+    row = conn.execute(
+        "SELECT result_json FROM analysis_cache WHERE text_hash=? AND detail_level=? AND spoiler_free=?",
+        (text_hash, detail_level, spoiler_free),
+    ).fetchone()
+    return json.loads(row["result_json"]) if row else None
+
+
+def _cache_analysis(conn, text_hash: str, detail_level: str, spoiler_free: int, result: dict):
+    """将分析结果写入全局缓存。INSERT OR IGNORE 自动处理并发重复。"""
+    conn.execute(
+        "INSERT OR IGNORE INTO analysis_cache (text_hash, detail_level, spoiler_free, result_json, created_at) VALUES (?, ?, ?, ?, ?)",
+        (text_hash, detail_level, spoiler_free, json.dumps(result, ensure_ascii=False), int(time.time())),
+    )
 
 
 init_db()
@@ -962,16 +992,16 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
 
     # 检查缓存
     with get_db() as conn:
-        cached = conn.execute(
-            """
-            SELECT result_json FROM analyses
-            WHERE username=? AND text_hash=? AND detail_level=? AND spoiler_free=?
-            """,
-            (user, content_hash, req.detail_level, spoiler_free),
-        ).fetchone()
-
+        cached = _get_cached_analysis(conn, content_hash, req.detail_level, spoiler_free)
+        if not cached:
+            old = conn.execute(
+                "SELECT result_json FROM analyses WHERE username=? AND text_hash=? AND detail_level=? AND spoiler_free=?",
+                (user, content_hash, req.detail_level, spoiler_free),
+            ).fetchone()
+            if old:
+                cached = json.loads(old["result_json"])
     if cached:
-        return ok({"result": json.loads(cached["result_json"]), "cached": True})
+        return ok({"result": cached, "cached": True})
 
     # 自动签到 + 扣额度
     with get_db() as conn:
@@ -1045,6 +1075,7 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
                 int(time.time()),
             ),
         )
+        _cache_analysis(conn, content_hash, req.detail_level, spoiler_free, result)
         # 更新书的章节计数
         if book_id:
             conn.execute(
@@ -1077,7 +1108,15 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
     _cleanup_user_last_request()
 
     content_hash = text_hash(req.text)
-    spoiler_free = 1 if req.spoiler_free else 0
+    spoiler_int = 1 if req.spoiler_free else 0
+
+    # 全局缓存检查
+    with get_db() as conn:
+        cached = _get_cached_analysis(conn, content_hash, req.detail_level, spoiler_int)
+    if cached:
+        async def cached_stream():
+            yield f"data: {json.dumps({'type': 'done', 'data': {'result': cached, 'cached': True}}, ensure_ascii=False)}\n\n"
+        return StreamingResponse(cached_stream(), media_type="text/event-stream")
 
     # 书籍匹配
     book_id = None
@@ -1115,7 +1154,7 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
         cached = conn.execute(
             """SELECT result_json FROM analyses
                WHERE username=? AND text_hash=? AND detail_level=? AND spoiler_free=?""",
-            (user, content_hash, req.detail_level, spoiler_free),
+            (user, content_hash, req.detail_level, spoiler_int),
         ).fetchone()
         if cached:
             # 缓存命中：不扣额，直接返回 done 事件
@@ -1164,7 +1203,7 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
                                     text_hash, detail_level, spoiler_free, result_json, created_at
                                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                                 (user, book_id, req.chapter_title, req.chapter_index,
-                                 req.source_url, content_hash, req.detail_level, spoiler_free,
+                                 req.source_url, content_hash, req.detail_level, spoiler_int,
                                  json.dumps(result, ensure_ascii=False), int(time.time())),
                             )
                             if book_id:
@@ -1172,6 +1211,7 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
                                     "UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?",
                                     (book_id, book_id),
                                 )
+                            _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
                     except Exception:
                         pass  # 保存失败不阻断流
 
@@ -1296,9 +1336,12 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                 cur = conn.execute("INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?,?,?,?,?)", (user, req.chapter_title or url_prefix, req.author or "", url_prefix, int(time.time())))
                 book_id = cur.lastrowid
 
-        cached = conn.execute("SELECT result_json FROM analyses WHERE username=? AND text_hash=? AND detail_level=? AND spoiler_free=?", (user, content_hash, req.detail_level, spoiler_int)).fetchone()
+        cached = _get_cached_analysis(conn, content_hash, req.detail_level, spoiler_int)
+        if not cached:
+            old = conn.execute("SELECT result_json FROM analyses WHERE username=? AND text_hash=? AND detail_level=? AND spoiler_free=?", (user, content_hash, req.detail_level, spoiler_int)).fetchone()
+            if old: cached = json.loads(old["result_json"])
         if cached:
-            async def ce(): yield f"data: {json.dumps({'type': 'done', 'data': {'result': json.loads(cached['result_json']), 'cached': True, 'book_id': book_id}}, ensure_ascii=False)}\n\n"
+            async def ce(): yield f"data: {json.dumps({'type': 'done', 'data': {'result': cached, 'cached': True, 'book_id': book_id}}, ensure_ascii=False)}\n\n"
             return StreamingResponse(ce(), media_type="text/event-stream")
 
         bonus = try_daily_bonus(conn, user)
@@ -1334,6 +1377,7 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                     with get_db() as db_conn:
                         db_conn.execute("INSERT OR REPLACE INTO analyses (username, book_id, chapter_title, chapter_index, source_url, text_hash, detail_level, spoiler_free, result_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (user, book_id, req.chapter_title, req.chapter_index, req.source_url, content_hash, req.detail_level, spoiler_int, json.dumps(result, ensure_ascii=False), int(time.time())))
                         if book_id: db_conn.execute("UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?", (book_id, book_id))
+                        _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
                 except Exception:
                     pass
 
@@ -1368,6 +1412,9 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
     if count >= 3:
         return fail("免费试用次数已用完（3次），注册即送 10 次额度！")
 
+    content_hash = text_hash(req.text)
+    spoiler_int = 1 if req.spoiler_free else 0
+
     analysis_text = req.text
     if len(analysis_text) > 8000:
         cut = analysis_text.rfind("\n", 0, 8000)
@@ -1390,6 +1437,7 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
                 try:
                     with get_db() as db_conn:
                         log_usage(db_conn, guest_username, "guest_analyze", f"试用分析: {req.chapter_title}", 0)
+                        _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
                 except Exception:
                     pass
 
@@ -1433,6 +1481,8 @@ def analyze_guest(req: GuestAnalyzeRequest, http_req: Request):
     if count >= 3:
         return fail("免费试用次数已用完（3次），注册即送 10 次额度，每天签到再领 8 次！点击浏览器工具栏的 📖 图标注册即可。")
 
+    content_hash = text_hash(req.text)
+
     # 超长文本智能截断
     analysis_text = req.text
     truncated = False
@@ -1461,6 +1511,7 @@ def analyze_guest(req: GuestAnalyzeRequest, http_req: Request):
     with get_db() as conn:
         log_usage(conn, guest_username, "guest_analyze",
                   f"试用分析: {req.chapter_title}", 0)
+        _cache_analysis(conn, content_hash, req.detail_level, 1 if req.spoiler_free else 0, result)
 
     response_data = {
         "result": result,
