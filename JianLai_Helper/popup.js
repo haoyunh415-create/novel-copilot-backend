@@ -265,7 +265,12 @@ async function loadRecentAnalyses(token) {
     var html = "";
     for (var j = 0; j < allAnalyses.length; j++) {
       var a = allAnalyses[j];
-      var result = typeof a.result_json === "string" ? JSON.parse(a.result_json) : a.result_json;
+      var result;
+      try {
+        result = typeof a.result_json === "string" ? JSON.parse(a.result_json) : a.result_json;
+      } catch (e) {
+        result = {};
+      }
       var summary = (result && result.summary) ? result.summary.slice(0, 60) : "无摘要";
       var time = a.created_at ? new Date(a.created_at * 1000).toLocaleDateString("zh-CN") : "";
       html += '<div style="padding:8px 12px;border-bottom:1px solid #eee;font-size:11px">' +
