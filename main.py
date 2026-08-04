@@ -1834,7 +1834,7 @@ def list_books(user=Depends(get_user)):
 
 
 @app.get("/api/books/{book_id}/analyses")
-def list_book_analyses(book_id: int, user=Depends(get_user)):
+def list_book_analyses(book_id: int, user=Depends(get_user), limit: int = None):
     with get_db() as conn:
         # 验证权限
         book = conn.execute(
@@ -1844,16 +1844,18 @@ def list_book_analyses(book_id: int, user=Depends(get_user)):
         if not book:
             return fail("书籍不存在")
 
-        rows = conn.execute(
-            """
+        sql = """
             SELECT id, chapter_title, chapter_index, source_url, detail_level,
-                   spoiler_free, created_at
+                   spoiler_free, result_json, created_at
             FROM analyses
             WHERE book_id=?
             ORDER BY COALESCE(chapter_index, 999999), created_at ASC
-            """,
-            (book_id,),
-        ).fetchall()
+            """
+        params = [book_id]
+        if limit is not None and limit > 0:
+            sql += " LIMIT ?"
+            params.append(limit)
+        rows = conn.execute(sql, params).fetchall()
 
     analyses = [dict(row) for row in rows]
     return ok({"book": dict(book), "analyses": analyses})
