@@ -328,15 +328,19 @@
           '<strong id="jl-heading">鉴来助手</strong>' +
           '<span>无剧透前情提要 / 伏笔雷达 / 关系图</span>' +
         '</div>' +
-        '<button id="jl-close" title="关闭">×</button>' +
+        '<div style="display:flex;gap:6px;align-items:center">' +
+          '<button id="jl-sidebar-toggle" title="切换侧边/浮动模式" style="width:30px;height:30px;color:#fff;background:rgba(255,255,255,.12);border-radius:50%!important;font-size:14px;display:flex;align-items:center;justify-content:center">📌</button>' +
+          '<button id="jl-close" title="关闭">×</button>' +
+        '</div>' +
       '</div>' +
       '<div class="jl-book-bar"><span id="jl-book-tag">当前：未分析章节</span></div>' +
-      '<div class="jl-tabs">' +
+      '<div class="jl-tabs" style="grid-template-columns:repeat(6,1fr)">' +
         '<button class="jl-tab is-active" data-panel="summary">概况</button>' +
         '<button class="jl-tab" data-panel="clues">伏笔</button>' +
         '<button class="jl-tab" data-panel="qa">问答</button>' +
         '<button class="jl-tab" data-panel="overview">总览</button>' +
         '<button class="jl-tab" data-panel="graph">关系图</button>' +
+        '<button class="jl-tab" data-panel="weekly">📊 周报</button>' +
       '</div>' +
       '<div class="jl-main">' +
         '<section id="jl-panel-summary" class="jl-panel is-active">' +
@@ -375,6 +379,11 @@
             '<button id="jl-graph-book" class="jl-graph-toggle" style="background:#E8DDD2;color:#5D4037">全书累计</button>' +
           '</div>' +
           '<div id="jl-graph"></div></section>' +
+        '<section id="jl-panel-weekly" class="jl-panel">' +
+          '<div class="jl-card"><h3>📊 本周阅读概览</h3><div id="jl-weekly-stats"></div></div>' +
+          '<div class="jl-card"><h3>👥 最关注角色</h3><div id="jl-weekly-characters"></div></div>' +
+          '<div class="jl-card"><h3>🔍 伏笔追踪</h3><div id="jl-weekly-clues"></div></div>' +
+        '</section>' +
       '</div>' +
       '<div class="jl-footer">' +
         '<div class="jl-controls">' +
@@ -395,7 +404,23 @@
 
     document.body.appendChild(win);
 
-    win.querySelector("#jl-close").addEventListener("click", () => win.remove());
+    var isSidebar = localStorage.getItem("JL_Sidebar_Mode") === "1";
+    if (isSidebar) applySidebarMode(win);
+
+    win.querySelector("#jl-close").addEventListener("click", function () {
+      if (localStorage.getItem("JL_Sidebar_Mode") === "1") {
+        // 侧边模式：最小化而不是关闭
+        win.style.display = "none";
+        document.body.style.marginRight = "";
+        document.body.style.transition = "margin-right .3s ease";
+      } else {
+        win.remove();
+      }
+    });
+
+    win.querySelector("#jl-sidebar-toggle").addEventListener("click", function () {
+      toggleSidebarMode(win);
+    });
     win.querySelector("#jl-run").addEventListener("click", runAnalyze);
     win.querySelector("#jl-ask").addEventListener("click", askMemory);
     win.querySelector("#jl-suggest-btn").addEventListener("click", fetchSuggestedQuestions);
@@ -2024,6 +2049,149 @@
     if (!tip) return;
     if (!tip.contains(e.target)) dismissTooltip();
   });
+
+  // ═══════════ 侧边栏模式切换 ═══════════
+
+  function applySidebarMode(win) {
+    win.style.cssText = 'position:fixed;top:0;right:0;width:420px;height:100vh;z-index:2147483647;display:flex;flex-direction:column;color:#2C2416;background:linear-gradient(180deg,#FBF8F0,#F5EDE0);border-left:1px solid #D7CCC8;box-shadow:-4px 0 24px rgba(0,0,0,.1);overflow:hidden;font-family:\"PingFang SC\",\"Microsoft YaHei\",system-ui,sans-serif;transition:transform .3s ease';
+    document.body.style.marginRight = '420px';
+    document.body.style.transition = 'margin-right .3s ease';
+    var toggle = document.getElementById("jl-sidebar-toggle");
+    if (toggle) { toggle.textContent = "📌"; toggle.title = "切换为浮动窗模式"; }
+    localStorage.setItem("JL_Sidebar_Mode", "1");
+  }
+
+  function removeSidebarMode(win) {
+    win.style.cssText = 'position:fixed;top:16px;right:16px;width:min(480px,calc(100vw - 32px));height:min(780px,calc(100vh - 32px));z-index:2147483647;display:flex;flex-direction:column;color:#2C2416;background:linear-gradient(180deg,#FBF8F0,#F5EDE0);border:1px solid #D7CCC8;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.08);overflow:hidden;font-family:\"PingFang SC\",\"Microsoft YaHei\",system-ui,sans-serif;animation:jlFadeIn .25s ease';
+    document.body.style.marginRight = '';
+    var toggle = document.getElementById("jl-sidebar-toggle");
+    if (toggle) { toggle.textContent = "📌"; toggle.title = "切换为侧边栏模式"; }
+    localStorage.setItem("JL_Sidebar_Mode", "0");
+  }
+
+  function toggleSidebarMode(win) {
+    if (localStorage.getItem("JL_Sidebar_Mode") === "1") {
+      removeSidebarMode(win);
+    } else {
+      applySidebarMode(win);
+    }
+  }
+
+  // ═══════════ 阅读周报 ═══════════
+
+  function renderWeeklyReport() {
+    // 收集所有分析数据
+    var allAnalyses = [];
+    if (typeof _serverAnalysisMap === "object") {
+      Object.keys(_serverAnalysisMap).forEach(function (k) {
+        if (k.indexOf("_local_") === 0) return;
+        allAnalyses.push(_serverAnalysisMap[k]);
+      });
+    }
+    // 补充 localStorage
+    var keys = Object.keys(localStorage);
+    for (var i = 0; i < keys.length; i++) {
+      if (keys[i].indexOf("JL_Archive_") === 0) {
+        try {
+          var d = JSON.parse(localStorage.getItem(keys[i]));
+          if (d && d.summary && allAnalyses.indexOf(d) === -1) allAnalyses.push(d);
+        } catch (_) {}
+      }
+    }
+
+    var totalChapters = allAnalyses.length;
+    var now = Date.now();
+    var weekAgo = now - 7 * 86400000;
+
+    // 本周分析章节数
+    var thisWeekCount = 0;
+    // 收集所有人物
+    var charCount = {};
+    // 收集所有伏笔
+    var allClues = [];
+    // 术语
+    var allTerms = {};
+    // 活跃天数
+    var activeDays = new Set();
+
+    allAnalyses.forEach(function (a) {
+      (a.characters || []).forEach(function (c) {
+        var name = c.name || c.label || "";
+        if (name) charCount[name] = (charCount[name] || 0) + 1;
+      });
+      (a.foreshadowing || []).forEach(function (f) {
+        if (f.clue) allClues.push({ clue: f.clue, confidence: f.confidence || 0, reason: f.reason || "" });
+      });
+      (a.terms || []).forEach(function (t) {
+        var term = t.term || t.name || "";
+        if (term) allTerms[term] = t.meaning || "";
+      });
+      // 估算分析日期（localStorage 无时间戳时跳过）
+      var ts = a._ts || 0;
+      if (ts > weekAgo) thisWeekCount++;
+      if (ts > 0 && ts > weekAgo) activeDays.add(new Date(ts).toDateString());
+    });
+
+    // Top 5 人物
+    var topChars = Object.entries(charCount).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 5);
+    // Top 5 伏笔
+    var topClues = allClues.sort(function (a, b) { return b.confidence - a.confidence; }).slice(0, 5);
+
+    // 渲染统计卡片
+    var statsHTML =
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">' +
+        '<div style="background:#FFF8E1;border-radius:8px;padding:12px;text-align:center">' +
+          '<div style="font-size:28px;font-weight:800;color:#E65100">' + totalChapters + '</div>' +
+          '<div style="font-size:11px;color:#8D6E63">累计分析章节</div>' +
+        '</div>' +
+        '<div style="background:#E8F5E9;border-radius:8px;padding:12px;text-align:center">' +
+          '<div style="font-size:28px;font-weight:800;color:#2E7D32">' + thisWeekCount + '</div>' +
+          '<div style="font-size:11px;color:#8D6E63">本周分析章节</div>' +
+        '</div>' +
+        '<div style="background:#E3F2FD;border-radius:8px;padding:12px;text-align:center">' +
+          '<div style="font-size:28px;font-weight:800;color:#1565C0">' + Object.keys(charCount).length + '</div>' +
+          '<div style="font-size:11px;color:#8D6E63">追踪人物总数</div>' +
+        '</div>' +
+        '<div style="background:#F3E5F5;border-radius:8px;padding:12px;text-align:center">' +
+          '<div style="font-size:28px;font-weight:800;color:#7B1FA2">' + allClues.length + '</div>' +
+          '<div style="font-size:11px;color:#8D6E63">发现伏笔线索</div>' +
+        '</div>' +
+      '</div>';
+
+    var el = document.getElementById("jl-weekly-stats");
+    if (el) el.innerHTML = statsHTML;
+
+    // 人物
+    var charHTML = topChars.length ? topChars.map(function (pair) {
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f0e8de">' +
+        '<span style="font-weight:600">' + escHtml(pair[0]) + '</span>' +
+        '<span style="font-size:11px;color:#8D6E63">出现 ' + pair[1] + ' 次</span></div>';
+    }).join("") : '<p class="jl-empty">分析更多章节后将显示</p>';
+    el = document.getElementById("jl-weekly-characters");
+    if (el) el.innerHTML = charHTML;
+
+    // 伏笔
+    var clueHTML = topClues.length ? topClues.map(function (c) {
+      var pct = Math.min(100, Math.max(0, parseInt(c.confidence) || 0));
+      return '<div style="padding:8px 0;border-bottom:1px solid #f0e8de">' +
+        '<div style="font-weight:600;margin-bottom:2px">' + escHtml(c.clue) + '</div>' +
+        '<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#8D6E63">' +
+          '<span style="color:#5D4037">可信度 ' + pct + '%</span>' +
+          '<span style="flex:1;height:4px;background:#E8DDD2;border-radius:2px"><span style="display:block;height:100%;width:' + pct + '%;background:#F57C00;border-radius:2px"></span></span>' +
+        '</div>' +
+        (c.reason ? '<div style="font-size:11px;color:#A1887F;margin-top:2px">' + escHtml(c.reason) + '</div>' : '') +
+      '</div>';
+    }).join("") : '<p class="jl-empty">分析更多章节后将显示</p>';
+    el = document.getElementById("jl-weekly-clues");
+    if (el) el.innerHTML = clueHTML;
+  }
+
+  // 切换到周报标签时自动刷新
+  var _origSwitchPanel = switchPanel;
+  switchPanel = function (panel) {
+    _origSwitchPanel(panel);
+    if (panel === "weekly") renderWeeklyReport();
+  };
 
   // 每次分析完成后重建人物索引
   var _origRenderResult = renderResult;
