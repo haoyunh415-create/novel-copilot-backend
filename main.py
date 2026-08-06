@@ -1448,19 +1448,19 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                 # 摘要先出（失败时用兜底文案）
                 try:
                     summary = sf.result()
-                except Exception:
-                    import logging
-                    logging.warning("analyze_progressive: summary call failed for user=%s", user[:16] if len(user) > 16 else user)
-                    summary = {"summary": "AI 服务暂时繁忙，摘要生成失败，请稍后重试分析"}
+                except Exception as e:
+                    import logging, traceback
+                    logging.warning("analyze_progressive: summary call failed for user=%s: %s", user[:16] if len(user) > 16 else user, str(e)[:200])
+                    summary = {"summary": f"AI 服务暂时不可用（{str(e)[:100]}），请稍后重试。持续失败请联系客服 QQ：2313370765"}
                 yield f"data: {json.dumps({'type': 'summary', 'data': summary}, ensure_ascii=False)}\n\n"
                 await asyncio.sleep(0.5)  # 让用户看清摘要再更新详情
 
                 # 详情后出（失败时降级为摘要+空详情，不报错）
                 try:
                     details = df.result()
-                except Exception:
+                except Exception as e:
                     import logging
-                    logging.warning("analyze_progressive: details call failed for user=%s, using degraded result", user[:16] if len(user) > 16 else user)
+                    logging.warning("analyze_progressive: details call failed for user=%s: %s", user[:16] if len(user) > 16 else user, str(e)[:200])
                     details = {"characters": [], "foreshadowing": [], "terms": [], "graph": {"nodes": [], "edges": []}}
                 result = {**summary, **details}
                 result["summary"] = summary.get("summary", "")  # 始终用摘要专用调用结果
@@ -1535,10 +1535,10 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
                 # 摘要先出（失败时用兜底文案）
                 try:
                     summary = sf.result()
-                except Exception:
+                except Exception as e:
                     import logging
-                    logging.warning("analyze_guest_progressive: summary call failed for guest=%s", guest_username[:16])
-                    summary = {"summary": "AI 服务暂时繁忙，摘要生成失败，请稍后重试分析"}
+                    logging.warning("analyze_guest_progressive: summary call failed for guest=%s: %s", guest_username[:16], str(e)[:200])
+                    summary = {"summary": f"AI 服务暂时不可用（{str(e)[:100]}），请稍后重试。持续失败请联系客服 QQ：2313370765"}
                 yield f"data: {json.dumps({'type': 'summary', 'data': summary}, ensure_ascii=False)}\n\n"
                 await asyncio.sleep(0.5)  # 让用户看清摘要再更新详情
 
@@ -1547,7 +1547,7 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
                     details = df.result()
                 except Exception:
                     import logging
-                    logging.warning("analyze_guest_progressive: details call failed for guest=%s, using degraded result", guest_username[:16])
+                    logging.warning("analyze_guest_progressive: details call failed for guest=%s: %s", guest_username[:16], str(e)[:200])
                     details = {"characters": [], "foreshadowing": [], "terms": [], "graph": {"nodes": [], "edges": []}}
                 result = {**summary, **details}
                 result["summary"] = summary.get("summary", "")  # 始终用摘要专用调用结果
