@@ -426,7 +426,27 @@
 
     win.querySelector("#jl-sidebar-toggle").addEventListener("click", function () {
       toggleSidebarMode(win);
+      var hint = document.getElementById("jl-sidebar-hint");
+      if (hint) { hint.style.opacity = "0"; setTimeout(function () { if (hint.parentNode) hint.remove(); }, 300); }
     });
+    // 首次使用显示侧边栏提示气泡
+    if (!localStorage.getItem("JL_Sidebar_Hint_Shown")) {
+      setTimeout(function () {
+        var btn = document.getElementById("jl-sidebar-toggle");
+        if (!btn) return;
+        var hint = document.createElement("span");
+        hint.id = "jl-sidebar-hint";
+        hint.textContent = "点击切换侧边/浮动";
+        hint.style.cssText = "position:absolute;top:-28px;right:0;padding:4px 10px;background:#5D4037;color:#fff;font-size:11px;border-radius:6px;white-space:nowrap;pointer-events:none;z-index:10;transition:opacity .3s;box-shadow:0 2px 8px rgba(0,0,0,.2)";
+        btn.parentElement.style.position = "relative";
+        btn.parentElement.appendChild(hint);
+        setTimeout(function () {
+          hint.style.opacity = "0";
+          setTimeout(function () { if (hint.parentNode) hint.remove(); }, 300);
+        }, 8000);
+        localStorage.setItem("JL_Sidebar_Hint_Shown", "1");
+      }, 1200);
+    }
     win.querySelector("#jl-run").addEventListener("click", runAnalyze);
     win.querySelector("#jl-ask").addEventListener("click", askMemory);
     win.querySelector("#jl-suggest-btn").addEventListener("click", fetchSuggestedQuestions);
