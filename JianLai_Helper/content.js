@@ -2086,7 +2086,12 @@
   // ═══════════ 阅读周报 ═══════════
 
   function renderWeeklyReport() {
-    // 收集所有分析数据
+    if (!_currentBookId) {
+      document.getElementById("jl-weekly-stats").innerHTML = '<p class="jl-empty">请先分析当前书籍的章节</p>';
+      return;
+    }
+
+    // 只统计当前书籍（_serverAnalysisMap 已经是按当前书筛选的）
     var allAnalyses = [];
     if (typeof _serverAnalysisMap === "object") {
       Object.keys(_serverAnalysisMap).forEach(function (k) {
@@ -2094,31 +2099,17 @@
         allAnalyses.push(_serverAnalysisMap[k]);
       });
     }
-    // 补充 localStorage
-    var keys = Object.keys(localStorage);
-    for (var i = 0; i < keys.length; i++) {
-      if (keys[i].indexOf("JL_Archive_") === 0) {
-        try {
-          var d = JSON.parse(localStorage.getItem(keys[i]));
-          if (d && d.summary && allAnalyses.indexOf(d) === -1) allAnalyses.push(d);
-        } catch (_) {}
-      }
+
+    if (allAnalyses.length === 0) {
+      document.getElementById("jl-weekly-stats").innerHTML = '<p class="jl-empty">分析当前书籍的章节后，这里将显示阅读统计</p>';
+      return;
     }
 
     var totalChapters = allAnalyses.length;
-    var now = Date.now();
-    var weekAgo = now - 7 * 86400000;
 
-    // 本周分析章节数
-    var thisWeekCount = 0;
-    // 收集所有人物
+    // 收集人物和伏笔
     var charCount = {};
-    // 收集所有伏笔
     var allClues = [];
-    // 术语
-    var allTerms = {};
-    // 活跃天数
-    var activeDays = new Set();
 
     allAnalyses.forEach(function (a) {
       (a.characters || []).forEach(function (c) {
@@ -2128,14 +2119,6 @@
       (a.foreshadowing || []).forEach(function (f) {
         if (f.clue) allClues.push({ clue: f.clue, confidence: f.confidence || 0, reason: f.reason || "" });
       });
-      (a.terms || []).forEach(function (t) {
-        var term = t.term || t.name || "";
-        if (term) allTerms[term] = t.meaning || "";
-      });
-      // 估算分析日期（localStorage 无时间戳时跳过）
-      var ts = a._ts || 0;
-      if (ts > weekAgo) thisWeekCount++;
-      if (ts > 0 && ts > weekAgo) activeDays.add(new Date(ts).toDateString());
     });
 
     // Top 5 人物
@@ -2143,24 +2126,26 @@
     // Top 5 伏笔
     var topClues = allClues.sort(function (a, b) { return b.confidence - a.confidence; }).slice(0, 5);
 
-    // 渲染统计卡片
+    // 渲染统计卡片（当前书籍）
+    var bookName = _currentBookTitle || "当前书籍";
     var statsHTML =
+      '<div style="font-size:11px;color:#8D6E63;margin-bottom:8px">📖 ' + bookName + '</div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">' +
         '<div style="background:#FFF8E1;border-radius:8px;padding:12px;text-align:center">' +
           '<div style="font-size:28px;font-weight:800;color:#E65100">' + totalChapters + '</div>' +
-          '<div style="font-size:11px;color:#8D6E63">累计分析章节</div>' +
-        '</div>' +
-        '<div style="background:#E8F5E9;border-radius:8px;padding:12px;text-align:center">' +
-          '<div style="font-size:28px;font-weight:800;color:#2E7D32">' + thisWeekCount + '</div>' +
-          '<div style="font-size:11px;color:#8D6E63">本周分析章节</div>' +
+          '<div style="font-size:11px;color:#8D6E63">已分析章节</div>' +
         '</div>' +
         '<div style="background:#E3F2FD;border-radius:8px;padding:12px;text-align:center">' +
           '<div style="font-size:28px;font-weight:800;color:#1565C0">' + Object.keys(charCount).length + '</div>' +
-          '<div style="font-size:11px;color:#8D6E63">追踪人物总数</div>' +
+          '<div style="font-size:11px;color:#8D6E63">出场人物</div>' +
         '</div>' +
         '<div style="background:#F3E5F5;border-radius:8px;padding:12px;text-align:center">' +
           '<div style="font-size:28px;font-weight:800;color:#7B1FA2">' + allClues.length + '</div>' +
-          '<div style="font-size:11px;color:#8D6E63">发现伏笔线索</div>' +
+          '<div style="font-size:11px;color:#8D6E63">伏笔线索</div>' +
+        '</div>' +
+        '<div style="background:#E8F5E9;border-radius:8px;padding:12px;text-align:center">' +
+          '<div style="font-size:28px;font-weight:800;color:#2E7D32">' + allAnalyses.reduce(function(s, a) { return s + ((a.foreshadowing || []).filter(function(f) { return (f.confidence || 0) >= 70; }).length); }, 0) + '</div>' +
+          '<div style="font-size:11px;color:#8D6E63">高可信度伏笔</div>' +
         '</div>' +
       '</div>';
 
