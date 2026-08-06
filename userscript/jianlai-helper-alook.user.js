@@ -488,7 +488,7 @@
           '<span>无剧透前情提要 / 伏笔雷达 / 关系图</span>' +
         '</div>' +
         '<span id="jl-credits-chip" style="display:none;padding:3px 10px;border-radius:12px;background:rgba(255,255,255,.15);font-size:12px;font-weight:600;white-space:nowrap"></span>' +
-        '<div style="display:flex;gap:6px;align-items:center"><button id="jl-sidebar-toggle" title="切换侧边/浮动" style="width:30px;height:30px;color:#fff;background:rgba(255,255,255,.12);border-radius:50%!important;font-size:14px;display:flex;align-items:center;justify-content:center">📌</button><button id="jl-close" title="关闭">×</button>' +
+        '<div style="display:flex;gap:6px;align-items:center"><button id="jl-sidebar-toggle" title="切换侧边/浮动" style="width:30px;height:30px;color:#fff;background:rgba(255,255,255,.12);border-radius:50%!important;font-size:14px;display:flex;align-items:center;justify-content:center">📌</button><button id="jl-close" title="关闭">×</button></div>' +
       '</div>' +
       '<div class="jl-book-bar"><span id="jl-book-tag">当前：未分析章节</span></div>' +
       '<div class="jl-tabs">' +
@@ -587,7 +587,17 @@
 
     var isSidebar = localStorage.getItem("JL_Sidebar_Mode") === "1";
     if (isSidebar) applySidebarMode(win);
-    win.querySelector("#jl-close").addEventListener("click", () => win.remove());
+    win.querySelector("#jl-close").addEventListener("click", function () {
+      if (localStorage.getItem("JL_Sidebar_Mode") === "1") {
+        win.style.display = "none";
+        document.body.style.marginRight = "";
+      } else {
+        win.remove();
+      }
+    });
+    win.querySelector("#jl-sidebar-toggle").addEventListener("click", function () {
+      toggleSidebarMode(win);
+    });
     win.querySelector("#jl-run").addEventListener("click", runAnalyze);
     win.querySelector("#jl-ask").addEventListener("click", askMemory);
     win.querySelector("#jl-suggest-btn").addEventListener("click", fetchSuggestedQuestions);
