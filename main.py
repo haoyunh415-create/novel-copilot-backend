@@ -1,4 +1,5 @@
-﻿import hashlib
+﻿import asyncio
+import hashlib
 import json
 import os
 import random
@@ -1447,9 +1448,15 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                 # 摘要先出
                 summary = sf.result()
                 yield f"data: {json.dumps({'type': 'summary', 'data': summary}, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.5)  # 让用户看清摘要再更新详情
 
-                # 详情后出
-                details = df.result()
+                # 详情后出（失败时降级为摘要+空详情，不报错）
+                try:
+                    details = df.result()
+                except Exception:
+                    import logging
+                    logging.warning("analyze_progressive: details call failed for user=%s, using degraded result", user[:16] if len(user) > 16 else user)
+                    details = {"characters": [], "foreshadowing": [], "terms": [], "graph": {"nodes": [], "edges": []}}
                 result = {**summary, **details}
                 result["summary"] = summary.get("summary", "")  # 始终用摘要专用调用结果
 
@@ -1522,8 +1529,15 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
 
                 summary = sf.result()
                 yield f"data: {json.dumps({'type': 'summary', 'data': summary}, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.5)  # 让用户看清摘要再更新详情
 
-                details = df.result()
+                # 详情后出（失败时降级为摘要+空详情，不报错）
+                try:
+                    details = df.result()
+                except Exception:
+                    import logging
+                    logging.warning("analyze_guest_progressive: details call failed for guest=%s, using degraded result", guest_username[:16])
+                    details = {"characters": [], "foreshadowing": [], "terms": [], "graph": {"nodes": [], "edges": []}}
                 result = {**summary, **details}
                 result["summary"] = summary.get("summary", "")  # 始终用摘要专用调用结果
 

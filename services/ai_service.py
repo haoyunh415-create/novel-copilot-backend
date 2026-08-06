@@ -312,7 +312,7 @@ JSON 格式：{{{{"characters":[{{{{"name":"","note":""}}}}],"foreshadowing":[{{
     payload = _call_ai([
         {"role": "system", "content": "你是一个专业的小说分析助手，只返回 JSON，不输出任何其他内容。"},
         {"role": "user", "content": prompt},
-    ], temperature=0.2, timeout=35, max_tokens=1536)
+    ], temperature=0.2, timeout=30, max_retries=1, max_tokens=1536)
 
     try:
         raw = payload["choices"][0]["message"]["content"]
