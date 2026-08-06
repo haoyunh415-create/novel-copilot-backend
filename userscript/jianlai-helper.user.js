@@ -897,6 +897,7 @@
         }
       });
     } catch (error) {
+      console.error("[鉴来助手] runGuestAnalyze 失败:", error);
       var errMsg = (error && error.message) || "分析失败，请稍后再试。联系客服 QQ：2313370765";
       setText("#jl-summary", errMsg);
       if (errMsg.indexOf("免费试用次数已用完") !== -1) showGuestRegisterPrompt();
@@ -1166,7 +1167,8 @@
         }
       });
     } catch (error) {
-      var errMsg = error.message || "分析失败，请稍后再试。联系客服 QQ：2313370765";
+      console.error("[鉴来助手] runAnalyze 失败:", error);
+      var errMsg = (error && error.message) || "分析失败，请稍后再试。联系客服 QQ：2313370765";
 
       if (errMsg.indexOf("额度不足") !== -1) {
         errMsg += "\n\n💡 每天签到免费领 8 次额度，打开「账号」标签即可自动领取";
