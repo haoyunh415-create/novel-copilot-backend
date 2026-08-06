@@ -89,6 +89,7 @@
   let _currentBookTitle = null;
   let _graphMode = "chapter";  // "chapter" | "book"
   let _lastFailedQuestion = null;
+  let _serverAnalysisMap = {};  // 章节→服务端分析数据映射
 
   // ═══════════ 页面信息提取 ═══════════
 
@@ -1653,27 +1654,43 @@
       var analyses = payload.data.analyses || [];
       if (analyses.length === 0) return;
 
+      // 构建章节→服务端分析数据的映射（优先于 localStorage）
+      _serverAnalysisMap = {};
+      analyses.forEach(function (a) {
+        var key = a.chapter_title || "";
+        if (key && a.result_json) {
+          try {
+            _serverAnalysisMap[key] = typeof a.result_json === "string" ? JSON.parse(a.result_json) : a.result_json;
+          } catch (_) {}
+        }
+      });
+
       // 在概况面板底部插入历史章节列表
       var section = document.createElement("div");
       section.id = "jl-history-section";
       section.className = "jl-card";
       section.innerHTML =
         '<h3>📚 本书已分析 ' + analyses.length + ' 章</h3>' +
-        '<p style="font-size:10px;color:#8b7c72;margin:2px 0 6px">点击章节可查看分析结果（已缓存内容）</p>' +
+        '<p style="font-size:10px;color:#8b7c72;margin:2px 0 6px">点击章节可查看分析结果（服务端同步）</p>' +
         '<div style="max-height:200px;overflow-y:auto;margin-top:8px">' +
         analyses.slice(-20).reverse().map(function (a) {
           var date = a.created_at ? new Date(a.created_at * 1000).toLocaleDateString("zh-CN") : "";
-          return '<div class="jl-list-item jl-hist-item" data-chapter="' + (a.chapter_title || "") + '" style="font-size:12px;cursor:pointer;transition:background .15s" onmouseover="this.style.background=\'#f4eee8\'" onmouseout="this.style.background=\'\'">' +
-            '🔒 <b>' + (a.chapter_title || "未知章节") + '</b>' +
+          var hasData = !!_serverAnalysisMap[a.chapter_title || ""];
+          var icon = hasData ? "📋" : "🔒";
+          return '<div class="jl-list-item jl-hist-item" data-chapter="' + (a.chapter_title || "").replace(/"/g, "&quot;") + '" style="font-size:12px;cursor:pointer;transition:background .15s" onmouseover="this.style.background=\'#f4eee8\'" onmouseout="this.style.background=\'\'">' +
+            icon + ' <b>' + (a.chapter_title || "未知章节") + '</b>' +
             (date ? ' <span style="color:#8b7c72;font-size:11px">' + date + '</span>' : '') +
           '</div>';
         }).join("") +
         '</div>';
 
-      // 绑定点击事件
+      // 绑定点击事件：显示分析结果并滚动到顶部
       section.querySelectorAll(".jl-hist-item").forEach(function (item) {
         item.addEventListener("click", function () {
           loadHistoryChapter(this.dataset.chapter);
+          // 滚动到概况面板顶部
+          var main = document.querySelector(".jl-main");
+          if (main) main.scrollTop = 0;
         });
       });
 
@@ -1690,16 +1707,25 @@
   }
 
   function loadHistoryChapter(chapterTitle) {
-    // 从 localStorage 找缓存的该章节分析结果
+    // 优先从服务端数据加载（跨设备同步），其次从 localStorage
     var found = null;
-    var keys = Object.keys(localStorage);
-    for (var i = 0; i < keys.length; i++) {
-      var k = keys[i];
-      if (k.indexOf("JL_Archive_") === 0 && k.indexOf(chapterTitle) !== -1) {
-        try {
-          var data = JSON.parse(localStorage.getItem(k));
-          if (data && data.summary) { found = data; break; }
-        } catch (_) {}
+
+    // 策略 1: 服务端数据（_serverAnalysisMap）
+    if (typeof _serverAnalysisMap === "object" && _serverAnalysisMap[chapterTitle]) {
+      found = _serverAnalysisMap[chapterTitle];
+    }
+
+    // 策略 2: localStorage 兜底
+    if (!found) {
+      var keys = Object.keys(localStorage);
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if (k.indexOf("JL_Archive_") === 0 && k.indexOf(chapterTitle) !== -1) {
+          try {
+            var data = JSON.parse(localStorage.getItem(k));
+            if (data && data.summary) { found = data; break; }
+          } catch (_) {}
+        }
       }
     }
 
@@ -1709,10 +1735,12 @@
       meta.className = "jl-meta";
       meta.textContent = "📋 正在查看历史分析：" + chapterTitle;
       document.getElementById("jl-summary").parentElement.insertBefore(meta, document.getElementById("jl-summary"));
-      // 切换到概况标签
       switchPanel("summary");
+      // 滚动到面板顶部，确保用户能看到结果
+      var mainEl = document.querySelector(".jl-main");
+      if (mainEl) mainEl.scrollTop = 0;
     } else {
-      alert("该章节的缓存已过期，请重新打开对应章节页面进行分析");
+      alert("未找到该章节的分析数据，请重新分析当前章节");
     }
   }
 
