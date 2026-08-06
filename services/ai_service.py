@@ -284,7 +284,9 @@ def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = Tru
         raw = payload["choices"][0]["message"]["content"]
         return _extract_json(raw)
     except Exception:
-        return {"summary": raw[:200] if raw else "分析失败"}
+        # 兜底：JSON 解析失败时，用清理后的纯文本作为摘要
+        clean_summary = _raw_to_plain_text(raw) if raw else "分析失败"
+        return {"summary": clean_summary}
 
 
 def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = True):
