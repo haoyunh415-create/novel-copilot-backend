@@ -1445,8 +1445,13 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                 sf = executor.submit(analyze_summary_only, analysis_text, req.chapter_title, req.spoiler_free, req.detail_level)
                 df = executor.submit(analyze_details_only, analysis_text, req.chapter_title, req.spoiler_free)
 
-                # 摘要先出
-                summary = sf.result()
+                # 摘要先出（失败时用兜底文案）
+                try:
+                    summary = sf.result()
+                except Exception:
+                    import logging
+                    logging.warning("analyze_progressive: summary call failed for user=%s", user[:16] if len(user) > 16 else user)
+                    summary = {"summary": "AI 服务暂时繁忙，摘要生成失败，请稍后重试分析"}
                 yield f"data: {json.dumps({'type': 'summary', 'data': summary}, ensure_ascii=False)}\n\n"
                 await asyncio.sleep(0.5)  # 让用户看清摘要再更新详情
 
@@ -1527,7 +1532,13 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
                 sf = executor.submit(analyze_summary_only, analysis_text, req.chapter_title, req.spoiler_free, req.detail_level)
                 df = executor.submit(analyze_details_only, analysis_text, req.chapter_title, req.spoiler_free)
 
-                summary = sf.result()
+                # 摘要先出（失败时用兜底文案）
+                try:
+                    summary = sf.result()
+                except Exception:
+                    import logging
+                    logging.warning("analyze_guest_progressive: summary call failed for guest=%s", guest_username[:16])
+                    summary = {"summary": "AI 服务暂时繁忙，摘要生成失败，请稍后重试分析"}
                 yield f"data: {json.dumps({'type': 'summary', 'data': summary}, ensure_ascii=False)}\n\n"
                 await asyncio.sleep(0.5)  # 让用户看清摘要再更新详情
 

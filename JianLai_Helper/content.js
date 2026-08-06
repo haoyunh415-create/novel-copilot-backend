@@ -2219,6 +2219,15 @@
     buildCharacterIndex();
   })();
 
+  // 侧边栏模式下页面加载时自动打开面板
+  if (localStorage.getItem("JL_Sidebar_Mode") === "1") {
+    setTimeout(function () {
+      var win = createWindow();
+      win.querySelector("#jl-heading").textContent = getChapterTitle();
+      win.style.display = "flex";  // 确保可见（覆盖之前可能的最小化状态）
+    }, 400);
+  }
+
   chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {
     if (req.action !== "START_ANALYZE") return;
     const win = createWindow();
