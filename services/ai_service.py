@@ -16,12 +16,50 @@ API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/comple
 MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
 
+def _strip_ai_chatter(text: str) -> str:
+    """移除 AI 在 JSON 前后的废话（"好的，这是分析结果：" 等）"""
+    # 常见的中文/英文 AI 前缀
+    prefixes = [
+        r"好的[，,]?\s*(?:这是[您你]的?)?[（(]?分析[）)]?结果[：:]\s*",
+        r"以下是[您你]?的?[（(]?(?:章节)?[）)]?分析[：:]\s*",
+        r"以下是[您你]需要[的]?[（(]?JSON[）)]?[：:]\s*",
+        r"好的[，,]?\s*为您分析[：:]\s*",
+        r"根据[您你]的?\s*要求[，,]\s*分析如下[：:]\s*",
+        r"Here\s+is\s+the\s+(?:analysis|JSON)[：:]\s*",
+        r"Sure[,!]\s+here['']s\s+the\s+(?:analysis|JSON)[：:]\s*",
+        r"当然[，,]?\s*这是[：:]\s*",
+        r"明白了?[，,]?\s*(?:这是|以下)?[：:]?\s*",
+    ]
+    for pat in prefixes:
+        text = re.sub(r"^" + pat, "", text, flags=re.IGNORECASE)
+
+    # 常见 AI 后缀
+    suffixes = [
+        r"\s*希望[这以上].*?[。！\.!]?\s*$",
+        r"\s*如果有.*?(?:可以|需要).*?[。！\.!]?\s*$",
+        r"\s*以上是.*?(?:分析|结果|内容).*?[。！\.!]?\s*$",
+        r"\s*I hope this.*?[\.!]?\s*$",
+    ]
+    for pat in suffixes:
+        text = re.sub(pat, "", text, flags=re.IGNORECASE)
+
+    return text.strip()
+
+
 def _extract_json(text: str):
     """多策略 JSON 提取，应对 AI 返回格式不一致的情况"""
+    # 预处理：移除 AI 废话
+    text = _strip_ai_chatter(text)
+
     # 策略 1: ```json ... ``` 代码块
     match = re.search(r"```json\s*([\s\S]*?)```", text)
     if match:
         text = match.group(1)
+    else:
+        # 策略 1b: ``` ... ``` 任意代码块
+        match = re.search(r"```\s*([\s\S]*?)```", text)
+        if match:
+            text = match.group(1)
 
     # 策略 2: 找最外层花括号（从第一个 { 到最后一个 }）
     start = text.find("{")
@@ -39,7 +77,14 @@ def _extract_json(text: str):
 
     # 策略 3: 修复常见 JSON 问题后重试
     fixed = _fix_json(json_str)
-    return json.loads(fixed)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+
+    # 策略 4: 激进清理后重试（处理内嵌控制字符、未转义换行等）
+    aggressive = _fix_json_aggressive(json_str)
+    return json.loads(aggressive)
 
 
 def _fix_json(text: str) -> str:
@@ -60,28 +105,38 @@ def _fix_json(text: str) -> str:
     return text
 
 
-def _call_ai(messages: list[dict], temperature: float = 0.2, timeout: int = 45, max_retries: int = 2):
+def _fix_json_aggressive(text: str) -> str:
+    """激进修复：处理更复杂的 JSON 格式问题"""
+    # 去除 BOM 和不可见控制字符（保留换行和制表符）
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+    return text
+
+
+def _call_ai(messages: list[dict], temperature: float = 0.2, timeout: int = 35, max_retries: int = 2, max_tokens: int = None):
     """调用 AI API，带自动重试"""
     last_error = None
     for attempt in range(max_retries):
         try:
+            body = {
+                "model": MODEL,
+                "messages": messages,
+                "temperature": temperature,
+            }
+            if max_tokens:
+                body["max_tokens"] = max_tokens
             response = _session.post(
                 API_URL,
                 headers={
                     "Authorization": f"Bearer {API_KEY}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": MODEL,
-                    "messages": messages,
-                    "temperature": temperature,
-                },
+                json=body,
                 timeout=timeout,
             )
             response.raise_for_status()
             return response.json()
         except requests.Timeout:
-            last_error = RuntimeError("AI 服务响应超时")
+            last_error = RuntimeError("AI 服务响应超时，请缩短章节内容或稍后重试")
             if attempt < max_retries - 1:
                 timeout += 15  # 重试时延长超时
         except requests.HTTPError as e:
@@ -103,9 +158,13 @@ def _call_ai(messages: list[dict], temperature: float = 0.2, timeout: int = 45, 
 
 
 def _normalize_result(result: dict, raw: str, degraded: bool = False):
-    graph = result.get("graph") if isinstance(result, dict) else {}
+    graph = result.get("graph") if (isinstance(result, dict) and isinstance(result.get("graph"), dict)) else {}
+    summary = str(result.get("summary") or "").strip()
+    if not summary:
+        # 兜底：从 raw 中提取纯文本（去除 JSON 格式符、代码块、AI 废话）
+        summary = _raw_to_plain_text(raw)
     return {
-        "summary": str(result.get("summary") or "").strip() or raw.strip()[:500],
+        "summary": summary,
         "characters": result.get("characters") if isinstance(result.get("characters"), list) else [],
         "foreshadowing": result.get("foreshadowing") if isinstance(result.get("foreshadowing"), list) else [],
         "terms": result.get("terms") if isinstance(result.get("terms"), list) else [],
@@ -116,6 +175,26 @@ def _normalize_result(result: dict, raw: str, degraded: bool = False):
         "raw": raw,
         "degraded": degraded,
     }
+
+
+def _raw_to_plain_text(raw: str, max_len: int = 500) -> str:
+    """将 AI 原始输出转为纯文本摘要（去除 JSON 结构、代码块、格式符）"""
+    text = raw.strip()
+    # 移除代码块标记
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    text = re.sub(r"```\w*", "", text)
+    # 移除 JSON 结构符号和逗号
+    text = re.sub(r'[\[\]{}"\\,]', " ", text)
+    # 移除 AI 废话前缀
+    text = _strip_ai_chatter(text)
+    # 移除键名残余（如 "summary":, "characters": 等），仅移除 key: 部分，保留值
+    text = re.sub(r'\b(summary|characters|foreshadowing|terms|graph|nodes|edges|id|label|level|name|note|clue|reason|confidence|term|meaning|from|to)\s*[:：]\s*', " ", text, flags=re.IGNORECASE)
+    # 合并多余空白和标点碎片
+    text = re.sub(r"\s+", " ", text).strip()
+    text = text.strip(",;，； ")
+    if not text or len(text) < 5:
+        return "AI 返回内容异常，请稍后重试"
+    return text[:max_len]
 
 
 SUMMARY_RULES = {
@@ -145,22 +224,22 @@ def analyze_text(text: str, chapter_title: str, detail_level: str = "standard", 
 
 输出要求（严格 JSON，不能有任何其他内容）：
 1. {summary_rule}
-2. characters：列出本章正文**明确出现**的 1-8 个关键人物。**只提取正文中能直接找到名字的人物，绝对不要凭经验或常识推测、补充、编造**。每人必须包含 name（名称）和 note（本章中的角色/动向，20字以内）。如果正文为乱码或无法提取人物，返回空数组 []
-3. foreshadowing：列出 0-5 条疑似伏笔或需要留意的线索。每条包含 clue（线索描述）、reason（为什么是伏笔，30字以内）、confidence（0-100 的可信度评分）
-4. terms：列出 0-5 个读者需要记住的地名、物品、势力、修炼术语。每条包含 term（术语）和 meaning（含义解释）
-5. graph.nodes：1-8 个关键人物节点（与 characters 保持一致），每人用 id、label、level（主角=core，其他=normal）
-6. graph.edges：人物之间的关系边，用 from、to、label（关系描述，如"师徒""盟友""敌对"）
+2. characters：列出 1-5 个关键人物。每人包含 name（名称）和 note（动向，15字以内）。正文乱码则返回空数组 []
+3. foreshadowing：列出 0-3 条线索。每条含 clue（描述）、reason（为什么是伏笔，20字以内）、confidence（0-100）
+4. terms：列出 0-3 个关键术语。每条含 term（术语）和 meaning（含义）
+5. graph.nodes：与 characters 一致，每人 id、label、level（core/normal）
+6. graph.edges：人物关系边，from、to、label（如"师徒""敌对"）
 
-严格按此 JSON 结构返回：
+JSON 结构：
 {{"summary":"...","characters":[{{"name":"","note":""}}],"foreshadowing":[{{"clue":"","reason":"","confidence":70}}],"terms":[{{"term":"","meaning":""}}],"graph":{{"nodes":[{{"id":"n1","label":"","level":"core"}}],"edges":[{{"from":"n1","to":"n2","label":""}}]}}}}
 
-章节正文：
+正文：
 {text}"""
 
     payload = _call_ai([
         {"role": "system", "content": "你是一个专业的小说分析助手，只返回符合要求的 JSON，不输出任何其他内容。"},
         {"role": "user", "content": prompt},
-    ], temperature=0.2, timeout=45)
+    ], temperature=0.2, timeout=35, max_tokens=2048)
 
     try:
         raw = payload["choices"][0]["message"]["content"]
@@ -199,7 +278,7 @@ def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = Tru
     payload = _call_ai([
         {"role": "system", "content": "你是一个专业的小说分析助手，只返回 JSON。"},
         {"role": "user", "content": prompt},
-    ], temperature=0.2, timeout=30)
+    ], temperature=0.2, timeout=20, max_tokens=512)
 
     try:
         raw = payload["choices"][0]["message"]["content"]
@@ -209,7 +288,7 @@ def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = Tru
 
 
 def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = True):
-    """生成人物、伏笔、术语、关系图（不含摘要），~12-15 秒"""
+    """生成人物、伏笔、术语、关系图（不含摘要），~8-12 秒"""
     if not API_KEY:
         raise RuntimeError("缺少 DEEPSEEK_API_KEY")
 
@@ -220,8 +299,8 @@ def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = Tru
     text = text[:8000] if len(text) > 8000 else text
 
     prompt = f"""章节标题：{chapter_title}。{spoiler_rule}
-分析以下内容，严格按 JSON 返回：
-- characters：1-5 个关键人物（name + note 10字以内）。只提取正文中明确出现的人物，不要编造。正文为乱码则返回空数组
+分析以下内容，严格按 JSON 返回（只输出 JSON，不要任何其他文字）：
+- characters：1-5 个关键人物（name + note 10字以内）
 - foreshadowing：0-3 条伏笔线索（clue + reason 15字以内 + confidence 0-100）
 - terms：0-3 个关键术语（term + meaning）
 - graph：人物关系 nodes（id、label、level）+ edges（from、to、label）
@@ -229,9 +308,9 @@ JSON 格式：{{{{"characters":[{{{{"name":"","note":""}}}}],"foreshadowing":[{{
 正文：{text}"""
 
     payload = _call_ai([
-        {"role": "system", "content": "你是一个专业的小说分析助手，只返回 JSON。"},
+        {"role": "system", "content": "你是一个专业的小说分析助手，只返回 JSON，不输出任何其他内容。"},
         {"role": "user", "content": prompt},
-    ], temperature=0.2, timeout=45)
+    ], temperature=0.2, timeout=35, max_tokens=1536)
 
     try:
         raw = payload["choices"][0]["message"]["content"]
@@ -271,18 +350,18 @@ def analyze_text_stream(text: str, chapter_title: str, detail_level: str = "stan
 
 章节标题：{chapter_title}
 
-输出要求（严格 JSON，不能有任何其他内容）：
+输出要求（严格 JSON）：
 1. {summary_rule}
-2. characters：列出本章正文**明确出现**的 1-8 个关键人物。**只提取正文中能直接找到名字的人物，绝对不要凭经验或常识推测、补充、编造**。每人必须包含 name（名称）和 note（本章中的角色/动向，20字以内）。如果正文为乱码或无法提取人物，返回空数组 []
-3. foreshadowing：列出 0-5 条疑似伏笔或需要留意的线索。每条包含 clue（线索描述）、reason（为什么是伏笔，30字以内）、confidence（0-100 的可信度评分）
-4. terms：列出 0-5 个读者需要记住的地名、物品、势力、修炼术语。每条包含 term（术语）和 meaning（含义解释）
-5. graph.nodes：1-8 个关键人物节点（与 characters 保持一致），每人用 id、label、level（主角=core，其他=normal）
-6. graph.edges：人物之间的关系边，用 from、to、label（关系描述，如"师徒""盟友""敌对"）
+2. characters：1-5 个关键人物（name + note 15字以内）
+3. foreshadowing：0-3 条线索（clue + reason 20字以内 + confidence 0-100）
+4. terms：0-3 个关键术语（term + meaning）
+5. graph.nodes：与 characters 一致，每人 id、label、level（core/normal）
+6. graph.edges：人物关系边 from、to、label
 
-严格按此 JSON 结构返回：
+JSON 结构：
 {{{{"summary":"...","characters":[{{{{"name":"","note":""}}}}],"foreshadowing":[{{{{"clue":"","reason":"","confidence":70}}}}],"terms":[{{{{"term":"","meaning":""}}}}],"graph":{{{{"nodes":[{{{{"id":"n1","label":"","level":"core"}}}}],"edges":[{{{{"from":"n1","to":"n2","label":""}}}}]}}}}}}}}
 
-章节正文：
+正文：
 {text}"""
 
     yield ("progress", {"stage": "connecting", "elapsed_s": round(_time_module.time() - start_time, 1)})
@@ -303,7 +382,7 @@ def analyze_text_stream(text: str, chapter_title: str, detail_level: str = "stan
                 "temperature": 0.2,
                 "stream": True,
             },
-            timeout=(15, 90),
+            timeout=(10, 60),
             stream=True,
         )
         response.raise_for_status()
