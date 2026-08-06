@@ -1012,6 +1012,12 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
                 except json.JSONDecodeError:
                     cached = None
     if cached:
+        # 回写全局缓存，使其他用户也能命中此分析结果
+        try:
+            with get_db() as wb_conn:
+                _cache_analysis(wb_conn, content_hash, req.detail_level, spoiler_free, cached)
+        except Exception:
+            pass
         return ok({"result": cached, "cached": True})
 
     # 自动签到 + 扣额度
@@ -1131,8 +1137,25 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
     with get_db() as conn:
         cached = _get_cached_analysis(conn, content_hash, req.detail_level, spoiler_int)
     if cached:
+        # 轻量 book_id 查找（只读，不创建新书）
+        cached_book_id = None
+        with get_db() as conn:
+            if req.book_title and req.book_title.strip():
+                book = conn.execute(
+                    "SELECT id FROM books WHERE username=? AND title=?",
+                    (user, req.book_title.strip()),
+                ).fetchone()
+                if book: cached_book_id = book["id"]
+            if not cached_book_id and req.source_url:
+                m = re.match(r"(https?://[^/]+(/[^/]+/[^/]+/)?)", req.source_url)
+                url_prefix = m.group(1) if m else req.source_url[:60]
+                book = conn.execute(
+                    "SELECT id FROM books WHERE username=? AND source_url_pattern=?",
+                    (user, url_prefix),
+                ).fetchone()
+                if book: cached_book_id = book["id"]
         async def cached_stream():
-            yield f"data: {json.dumps({'type': 'done', 'data': {'result': cached, 'cached': True}}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'data': {'result': cached, 'cached': True, 'book_id': cached_book_id}}, ensure_ascii=False)}\n\n"
         return StreamingResponse(cached_stream(), media_type="text/event-stream")
 
     # 书籍匹配
@@ -1180,6 +1203,12 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
             except json.JSONDecodeError:
                 cached_result = None
             if cached_result:
+                # 回写全局缓存，使其他用户也能命中此分析结果
+                try:
+                    with get_db() as wb_conn:
+                        _cache_analysis(wb_conn, content_hash, req.detail_level, spoiler_int, cached_result)
+                except Exception:
+                    pass
                 async def cached_stream():
                     resp = {"type": "done", "data": {"result": cached_result, "cached": True, "book_id": book_id}}
                     yield f"data: {json.dumps(resp, ensure_ascii=False)}\n\n"
@@ -1235,6 +1264,8 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
                                 )
                             _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
                     except Exception:
+                        import logging
+                        logging.warning("analyze_stream: failed to save analysis for user=%s chapter=%s", user[:16] if len(user) > 16 else user, req.chapter_title[:30])
                         pass  # 保存失败不阻断流
 
                     resp = {"type": "done", "data": {"result": result, "cached": False, "book_id": book_id}}
@@ -1324,6 +1355,8 @@ async def analyze_guest_stream(req: GuestAnalyzeRequest, http_req: Request):
                         log_usage(db_conn, guest_username, "guest_analyze", f"试用分析: {req.chapter_title}", 0)
                         _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
                 except Exception:
+                    import logging
+                    logging.warning("analyze_guest_stream: failed to save result for guest=%s", guest_username[:16])
                     pass
                 remaining = 2 - count
                 resp = {"type": "done", "data": {"result": result, "cached": False, "guest_uses_remaining": remaining}}
@@ -1382,6 +1415,12 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                 except json.JSONDecodeError:
                     cached = None
         if cached:
+            # 回写全局缓存，使其他用户也能命中此分析结果
+            try:
+                with get_db() as wb_conn:
+                    _cache_analysis(wb_conn, content_hash, req.detail_level, spoiler_int, cached)
+            except Exception:
+                pass
             async def ce(): yield f"data: {json.dumps({'type': 'done', 'data': {'result': cached, 'cached': True, 'book_id': book_id}}, ensure_ascii=False)}\n\n"
             return StreamingResponse(ce(), media_type="text/event-stream")
 
@@ -1420,6 +1459,8 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                         if book_id: db_conn.execute("UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?", (book_id, book_id))
                         _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
                 except Exception:
+                    import logging
+                    logging.warning("analyze_progressive: failed to save analysis for user=%s", user[:16] if len(user) > 16 else user)
                     pass
 
                 yield f"data: {json.dumps({'type': 'done', 'data': {'result': result, 'cached': False, 'book_id': book_id}}, ensure_ascii=False)}\n\n"
@@ -1491,7 +1532,8 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
                         log_usage(db_conn, guest_username, "guest_analyze", f"试用分析: {req.chapter_title}", 0)
                         _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
                 except Exception:
-                    pass
+                    import logging
+                    logging.warning("analyze_guest_progressive: failed to save result for guest=%s", guest_username[:16])
 
                 remaining = 2 - count
                 yield f"data: {json.dumps({'type': 'done', 'data': {'result': result, 'cached': False, 'guest_uses_remaining': remaining}}, ensure_ascii=False)}\n\n"
@@ -1867,6 +1909,12 @@ def list_books(user=Depends(get_user)):
 
 @app.get("/api/books/{book_id}/analyses")
 def list_book_analyses(book_id: int, user=Depends(get_user), limit: int = None):
+    # 校验 limit 参数：负数视为无限制，超大值限制在 100
+    if limit is not None:
+        if limit < 0:
+            limit = None
+        elif limit > 100:
+            limit = 100
     with get_db() as conn:
         # 验证权限
         book = conn.execute(
@@ -2389,7 +2437,7 @@ def admin_stats(_admin=Depends(verify_admin)):
             (week_ago,)
         ).fetchone()[0]
         error_count = conn.execute(
-            "SELECT COUNT(*) FROM usage_logs WHERE created_at >= ? AND (action='error' OR detail LIKE '%失败%' OR detail LIKE '%错误%')",
+            "SELECT COUNT(*) FROM usage_logs WHERE created_at >= ? AND action='error'",
             (week_ago,)
         ).fetchone()[0]
         error_rate = round(error_count / total_requests * 100, 1) if total_requests > 0 else 0
