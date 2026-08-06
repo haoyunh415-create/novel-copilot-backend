@@ -486,7 +486,7 @@
           '<span>无剧透前情提要 / 伏笔雷达 / 关系图</span>' +
         '</div>' +
         '<span id="jl-credits-chip" style="display:none;padding:3px 10px;border-radius:12px;background:rgba(255,255,255,.15);font-size:12px;font-weight:600;white-space:nowrap"></span>' +
-        '<button id="jl-close" title="关闭">×</button>' +
+        '<div style="display:flex;gap:6px;align-items:center"><button id="jl-sidebar-toggle" title="切换侧边/浮动" style="width:30px;height:30px;color:#fff;background:rgba(255,255,255,.12);border-radius:50%!important;font-size:14px;display:flex;align-items:center;justify-content:center">📌</button><button id="jl-close" title="关闭">×</button>' +
       '</div>' +
       '<div class="jl-book-bar"><span id="jl-book-tag">当前：未分析章节</span></div>' +
       '<div class="jl-tabs">' +
@@ -494,7 +494,7 @@
         '<button class="jl-tab" data-panel="clues">伏笔</button>' +
         '<button class="jl-tab" data-panel="qa">问答</button>' +
         '<button class="jl-tab" data-panel="overview">总览</button>' +
-        '<button class="jl-tab" data-panel="graph">关系图</button>' +
+        '<button class="jl-tab" data-panel="graph">关系图</button><button class="jl-tab" data-panel="weekly">📊 周报</button>' +
         '<button class="jl-tab" data-panel="account">账号</button>' +
       '</div>' +
       '<div class="jl-main">' +
@@ -533,7 +533,7 @@
             '<button id="jl-graph-chapter" class="jl-graph-toggle" style="background:#5D4037;color:#fff">当前章节</button>' +
             '<button id="jl-graph-book" class="jl-graph-toggle" style="background:#E8DDD2;color:#5D4037">全书累计</button>' +
           '</div>' +
-          '<div id="jl-graph"></div></section>' +
+          '<div id="jl-graph"></div></section><section id="jl-panel-weekly" class="jl-panel"><div class="jl-card"><h3>📊 本周阅读概览</h3><div id="jl-weekly-stats"></div></div><div class="jl-card"><h3>👥 最关注角色</h3><div id="jl-weekly-characters"></div></div><div class="jl-card"><h3>🔍 伏笔追踪</h3><div id="jl-weekly-clues"></div></div></section>' +
         '<section id="jl-panel-account" class="jl-panel">' +
           '<p id="jl-acc-msg" style="min-height:14px;font-size:12px;margin:0 0 8px;text-align:center;color:#6D4C41"></p>' +
           '<div class="jl-card" id="jl-auth-box">' +
@@ -583,6 +583,8 @@
 
     document.body.appendChild(win);
 
+    var isSidebar = localStorage.getItem("JL_Sidebar_Mode") === "1";
+    if (isSidebar) applySidebarMode(win);
     win.querySelector("#jl-close").addEventListener("click", () => win.remove());
     win.querySelector("#jl-run").addEventListener("click", runAnalyze);
     win.querySelector("#jl-ask").addEventListener("click", askMemory);
@@ -2352,4 +2354,241 @@
     createLauncher();
   }
   init();
+    // ═══════════ 划词查询人物 ═══════════
+  var _characterIndex = {};  // 人物名 → {notes, chapters, foreshadowing}
+
+  function buildCharacterIndex() {
+    var index = {};
+    // 从服务端数据收集所有人物
+    if (typeof _serverAnalysisMap === "object") {
+      Object.keys(_serverAnalysisMap).forEach(function (chTitle) {
+        var analysis = _serverAnalysisMap[chTitle];
+        var chars = analysis.characters || [];
+        chars.forEach(function (c) {
+          var name = (c.name || c.label || "").trim();
+          if (!name || name.length < 1 || name.length > 20) return;
+          if (!index[name]) {
+            index[name] = { notes: [], chapters: [], foreshadowing: [], terms: [] };
+          }
+          if (c.note && index[name].notes.indexOf(c.note) === -1) {
+            index[name].notes.push(c.note);
+          }
+          if (index[name].chapters.indexOf(chTitle) === -1) {
+            index[name].chapters.push(chTitle);
+          }
+        });
+        // 收集术语
+        (analysis.terms || []).forEach(function (t) {
+          var term = (t.term || t.name || "").trim();
+          if (!term || term.length < 1 || term.length > 20) return;
+          if (!index[term]) {
+            index[term] = { notes: [], chapters: [], foreshadowing: [], terms: [t.meaning || ""] };
+          }
+        });
+      });
+    }
+    _characterIndex = index;
+  }
+
+  function showCharacterTooltip(name, info, x, y) {
+    dismissTooltip();
+    var tip = document.createElement("div");
+    tip.id = "jl-char-tooltip";
+    var notesHTML = info.notes.slice(0, 3).map(function (n) {
+      return '<span class="jl-ct-note">' + escHtml(n) + '</span>';
+    }).join("");
+    var chaptersHTML = info.chapters.slice(-3).map(function (c) {
+      return '<span class="jl-ct-chapter">📖 ' + escHtml(c) + '</span>';
+    }).join("");
+    var clueHTML = info.foreshadowing.slice(0, 2).map(function (f) {
+      return '<span class="jl-ct-clue">🔍 ' + escHtml(f) + '</span>';
+    }).join("");
+    tip.innerHTML =
+      '<div class="jl-ct-header">' +
+        '<span class="jl-ct-name">' + escHtml(name) + '</span>' +
+        '<button class="jl-ct-close" onclick="dismissTooltip()">×</button>' +
+      '</div>' +
+      (notesHTML ? '<div class="jl-ct-section"><div class="jl-ct-label">角色定位</div>' + notesHTML + '</div>' : '') +
+      (chaptersHTML ? '<div class="jl-ct-section"><div class="jl-ct-label">近期出场</div>' + chaptersHTML + '</div>' : '') +
+      (clueHTML ? '<div class="jl-ct-section"><div class="jl-ct-label">关联线索</div>' + clueHTML + '</div>' : '') +
+      (info.terms.length ? '<div class="jl-ct-section"><div class="jl-ct-label">名词解释</div><span class="jl-ct-note">' + escHtml(info.terms[0]) + '</span></div>' : '') +
+      '<div class="jl-ct-footer">共 ' + info.chapters.length + ' 章出场 · 点击外部关闭</div>';
+    tip.style.cssText = 'position:fixed;z-index:2147483650;width:min(340px,90vw);max-height:420px;overflow-y:auto;background:#fffef9;border:1px solid #D7CCC8;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.16);padding:16px;font-size:13px;animation:jlFadeIn .2s ease';
+    document.body.appendChild(tip);
+    // 定位在选中文字附近
+    var tipW = tip.offsetWidth;
+    var tipH = Math.min(tip.offsetHeight, 420);
+    var left = Math.min(x + 10, window.innerWidth - tipW - 16);
+    var top = y + 20;
+    if (top + tipH > window.innerHeight - 80) top = y - tipH - 10;
+    if (top < 16) top = 16;
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+  }
+
+  window.dismissTooltip = function () {
+    var el = document.getElementById("jl-char-tooltip");
+    if (el) el.remove();
+  };
+
+  document.addEventListener("mouseup", function (e) {
+    setTimeout(function () {
+      var sel = window.getSelection();
+      var text = (sel.toString() || "").trim();
+      // 只匹配 1-10 个字符的人名/术语
+      if (!text || text.length < 1 || text.length > 10) return;
+      if (/[\x00-\x1f<>]/.test(text)) return;
+      // 查找匹配
+      var info = _characterIndex[text];
+      if (!info) {
+        // 模糊匹配（包含关系）
+        var keys = Object.keys(_characterIndex);
+        for (var i = 0; i < keys.length; i++) {
+          if (keys[i].indexOf(text) !== -1 || text.indexOf(keys[i]) !== -1) {
+            info = _characterIndex[keys[i]];
+            text = keys[i];
+            break;
+          }
+        }
+      }
+      if (!info) return;
+      showCharacterTooltip(text, info, e.clientX, e.clientY);
+    }, 50);
+  });
+
+  // 点击其他地方关闭
+  document.addEventListener("mousedown", function (e) {
+    var tip = document.getElementById("jl-char-tooltip");
+    if (!tip) return;
+    if (!tip.contains(e.target)) dismissTooltip();
+  });
+
+  // ═══════════ 侧边栏模式切换 ═══════════
+
+  function applySidebarMode(win) {
+    win.style.cssText = 'position:fixed;top:0;right:0;width:420px;height:100vh;z-index:2147483647;display:flex;flex-direction:column;color:#2C2416;background:linear-gradient(180deg,#FBF8F0,#F5EDE0);border-left:1px solid #D7CCC8;box-shadow:-4px 0 24px rgba(0,0,0,.1);overflow:hidden;font-family:\"PingFang SC\",\"Microsoft YaHei\",system-ui,sans-serif;transition:transform .3s ease';
+    document.body.style.marginRight = '420px';
+    document.body.style.transition = 'margin-right .3s ease';
+    var toggle = document.getElementById("jl-sidebar-toggle");
+    if (toggle) { toggle.textContent = "📌"; toggle.title = "切换为浮动窗模式"; }
+    localStorage.setItem("JL_Sidebar_Mode", "1");
+  }
+
+  function removeSidebarMode(win) {
+    win.style.cssText = 'position:fixed;top:16px;right:16px;width:min(480px,calc(100vw - 32px));height:min(780px,calc(100vh - 32px));z-index:2147483647;display:flex;flex-direction:column;color:#2C2416;background:linear-gradient(180deg,#FBF8F0,#F5EDE0);border:1px solid #D7CCC8;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.08);overflow:hidden;font-family:\"PingFang SC\",\"Microsoft YaHei\",system-ui,sans-serif;animation:jlFadeIn .25s ease';
+    document.body.style.marginRight = '';
+    var toggle = document.getElementById("jl-sidebar-toggle");
+    if (toggle) { toggle.textContent = "📌"; toggle.title = "切换为侧边栏模式"; }
+    localStorage.setItem("JL_Sidebar_Mode", "0");
+  }
+
+  function toggleSidebarMode(win) {
+    if (localStorage.getItem("JL_Sidebar_Mode") === "1") {
+      removeSidebarMode(win);
+    } else {
+      applySidebarMode(win);
+    }
+  }
+
+  // ═══════════ 阅读周报 ═══════════
+
+  function renderWeeklyReport() {
+    if (!_currentBookId) {
+      document.getElementById("jl-weekly-stats").innerHTML = '<p class="jl-empty">请先分析当前书籍的章节</p>';
+      return;
+    }
+
+    // 只统计当前书籍（_serverAnalysisMap 已经是按当前书筛选的）
+    var allAnalyses = [];
+    if (typeof _serverAnalysisMap === "object") {
+      Object.keys(_serverAnalysisMap).forEach(function (k) {
+        if (k.indexOf("_local_") === 0) return;
+        allAnalyses.push(_serverAnalysisMap[k]);
+      });
+    }
+
+    if (allAnalyses.length === 0) {
+      document.getElementById("jl-weekly-stats").innerHTML = '<p class="jl-empty">分析当前书籍的章节后，这里将显示阅读统计</p>';
+      return;
+    }
+
+    var totalChapters = allAnalyses.length;
+
+    // 收集人物和伏笔
+    var charCount = {};
+    var allClues = [];
+
+    allAnalyses.forEach(function (a) {
+      (a.characters || []).forEach(function (c) {
+        var name = c.name || c.label || "";
+        if (name) charCount[name] = (charCount[name] || 0) + 1;
+      });
+      (a.foreshadowing || []).forEach(function (f) {
+        if (f.clue) allClues.push({ clue: f.clue, confidence: f.confidence || 0, reason: f.reason || "" });
+      });
+    });
+
+    // Top 5 人物
+    var topChars = Object.entries(charCount).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 5);
+    // Top 5 伏笔
+    var topClues = allClues.sort(function (a, b) { return b.confidence - a.confidence; }).slice(0, 5);
+
+    // 渲染统计卡片（当前书籍）
+    var bookName = _currentBookTitle || "当前书籍";
+    var statsHTML =
+      '<div style="font-size:11px;color:#8D6E63;margin-bottom:8px">📖 ' + bookName + '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">' +
+        '<div style="background:#FFF8E1;border-radius:8px;padding:12px;text-align:center">' +
+          '<div style="font-size:28px;font-weight:800;color:#E65100">' + totalChapters + '</div>' +
+          '<div style="font-size:11px;color:#8D6E63">已分析章节</div>' +
+        '</div>' +
+        '<div style="background:#E3F2FD;border-radius:8px;padding:12px;text-align:center">' +
+          '<div style="font-size:28px;font-weight:800;color:#1565C0">' + Object.keys(charCount).length + '</div>' +
+          '<div style="font-size:11px;color:#8D6E63">出场人物</div>' +
+        '</div>' +
+        '<div style="background:#F3E5F5;border-radius:8px;padding:12px;text-align:center">' +
+          '<div style="font-size:28px;font-weight:800;color:#7B1FA2">' + allClues.length + '</div>' +
+          '<div style="font-size:11px;color:#8D6E63">伏笔线索</div>' +
+        '</div>' +
+        '<div style="background:#E8F5E9;border-radius:8px;padding:12px;text-align:center">' +
+          '<div style="font-size:28px;font-weight:800;color:#2E7D32">' + allAnalyses.reduce(function(s, a) { return s + ((a.foreshadowing || []).filter(function(f) { return (f.confidence || 0) >= 70; }).length); }, 0) + '</div>' +
+          '<div style="font-size:11px;color:#8D6E63">高可信度伏笔</div>' +
+        '</div>' +
+      '</div>';
+
+    var el = document.getElementById("jl-weekly-stats");
+    if (el) el.innerHTML = statsHTML;
+
+    // 人物
+    var charHTML = topChars.length ? topChars.map(function (pair) {
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f0e8de">' +
+        '<span style="font-weight:600">' + escHtml(pair[0]) + '</span>' +
+        '<span style="font-size:11px;color:#8D6E63">出现 ' + pair[1] + ' 次</span></div>';
+    }).join("") : '<p class="jl-empty">分析更多章节后将显示</p>';
+    el = document.getElementById("jl-weekly-characters");
+    if (el) el.innerHTML = charHTML;
+
+    // 伏笔
+    var clueHTML = topClues.length ? topClues.map(function (c) {
+      var pct = Math.min(100, Math.max(0, parseInt(c.confidence) || 0));
+      return '<div style="padding:8px 0;border-bottom:1px solid #f0e8de">' +
+        '<div style="font-weight:600;margin-bottom:2px">' + escHtml(c.clue) + '</div>' +
+        '<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#8D6E63">' +
+          '<span style="color:#5D4037">可信度 ' + pct + '%</span>' +
+          '<span style="flex:1;height:4px;background:#E8DDD2;border-radius:2px"><span style="display:block;height:100%;width:' + pct + '%;background:#F57C00;border-radius:2px"></span></span>' +
+        '</div>' +
+        (c.reason ? '<div style="font-size:11px;color:#A1887F;margin-top:2px">' + escHtml(c.reason) + '</div>' : '') +
+      '</div>';
+    }).join("") : '<p class="jl-empty">分析更多章节后将显示</p>';
+    el = document.getElementById("jl-weekly-clues");
+    if (el) el.innerHTML = clueHTML;
+  }
+
+  // 切换到周报标签时自动刷新
+  var _origSwitchPanel = switchPanel;
+  switchPanel = function (panel) {
+    _origSwitchPanel(panel);
+    if (panel === "weekly") renderWeeklyReport();
+  };
+
 })();
