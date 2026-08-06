@@ -147,7 +147,7 @@ nav .container{display:flex;align-items:center;justify-content:space-between}
   letter-spacing:.12em;color:var(--brown-light);margin-bottom:10px;
 }
 .section-title{text-align:center;margin-bottom:52px;color:var(--brown-dark)}
-.feature-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+.feature-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
 .feature-card{
   padding:30px 26px 26px;background:var(--card);border-radius:14px;
   border:1px solid rgba(139,115,85,.11);transition:all .35s;
@@ -283,7 +283,7 @@ footer a:hover{color:var(--vermillion)}
 
 /* ═══════ Responsive ═══════ */
 @media(max-width:768px){
-  .feature-grid{grid-template-columns:1fr}
+  .feature-grid{grid-template-columns:repeat(2,1fr)}
   .steps-grid{grid-template-columns:1fr}
   .step-arrow{display:none}
   .plugin-popup{position:relative;top:auto;right:auto;width:100%;border-radius:0}
@@ -321,8 +321,8 @@ footer a:hover{color:var(--vermillion)}
       追更<em>不迷路</em>的<br>AI 阅读助手
     </h1>
     <p class="hero-subtitle reveal d2">
-      800 章的长篇也不怕失忆。AI 自动追踪伏笔、梳理人物关系、
-      生成无剧透前情提要，让你随时无缝接上阅读节奏。
+      800 章的长篇也不怕失忆。AI 智能摘要 · 伏笔雷达 · 人物关系图 · 划词查角色 ·
+      侧边阅读 · 阅读周报 · 无剧透问答，让你随时无缝接上阅读节奏。
     </p>
     <div class="hero-actions reveal d3">
       <a href="https://microsoftedge.microsoft.com/addons/detail/%E9%89%B4%E6%9D%A5%E5%8A%A9%E6%89%8B-%E5%B0%8F%E8%AF%B4-ai-%E4%BC%8F%E7%AC%94%E9%9B%B7%E8%BE%BE/nmanflfocdfldmijbfngdbgpaoodbkcp" class="btn btn-primary" target="_blank" rel="noopener">
@@ -346,13 +346,13 @@ footer a:hover{color:var(--vermillion)}
 <section class="features" id="features">
   <div class="container">
     <p class="section-label reveal">为什么需要鉴来助手</p>
-    <h2 class="section-title reveal d1">四件套，追更无忧</h2>
+    <h2 class="section-title reveal d1">六大功能，追更无忧</h2>
     <div class="feature-grid">
 
       <div class="feature-card reveal d1">
         <div class="feature-icon">📝</div>
-        <h3>智能章节摘要</h3>
-        <p>每章自动提炼前情提要，隔几天再看也能秒接上。支持简洁 / 标准 / 详细三种粒度，阅读进度无缝衔接。</p>
+        <h3>渐进式章节摘要</h3>
+        <p>每章自动提炼前情提要，摘要 3~5 秒先出、详情随后加载。支持简洁/标准/详细三种粒度，阅读进度无缝衔接。</p>
       </div>
 
       <div class="feature-card reveal d2">
@@ -365,6 +365,24 @@ footer a:hover{color:var(--vermillion)}
         <div class="feature-icon">👥</div>
         <h3>人物关系图谱</h3>
         <p>自动画出人物之间的互动关系网，核心角色高亮标注。800 章的长篇也能一眼看清谁是谁，再也不用翻回前面找。</p>
+      </div>
+
+      <div class="feature-card reveal d1">
+        <div class="feature-icon">🔍</div>
+        <h3>划词查询角色</h3>
+        <p>鼠标选中任意人物名或术语→弹出信息卡，显示角色定位、出场章节、关联伏笔。不离开当前页面就能回顾上下文。</p>
+      </div>
+
+      <div class="feature-card reveal d2">
+        <div class="feature-icon">📌</div>
+        <h3>侧边阅读模式</h3>
+        <p>一键切换浮动窗/侧边栏，面板固定在屏幕右侧，边看小说边看分析，页面内容自动适配不遮挡。</p>
+      </div>
+
+      <div class="feature-card reveal d3">
+        <div class="feature-icon">📊</div>
+        <h3>阅读周报</h3>
+        <p>按书籍统计已分析章节、出场人物、伏笔线索。一眼看清阅读进度，智能推荐最值得关注的角色和线索。</p>
       </div>
 
       <div class="feature-card reveal d4">
