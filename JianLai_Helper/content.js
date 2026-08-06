@@ -1916,6 +1916,141 @@
     URL.revokeObjectURL(url);
   }
 
+  // ═══════════ 划词查询人物 ═══════════
+  var _characterIndex = {};  // 人物名 → {notes, chapters, foreshadowing}
+
+  function buildCharacterIndex() {
+    var index = {};
+    // 从服务端数据收集所有人物
+    if (typeof _serverAnalysisMap === "object") {
+      Object.keys(_serverAnalysisMap).forEach(function (chTitle) {
+        var analysis = _serverAnalysisMap[chTitle];
+        var chars = analysis.characters || [];
+        chars.forEach(function (c) {
+          var name = (c.name || c.label || "").trim();
+          if (!name || name.length < 1 || name.length > 20) return;
+          if (!index[name]) {
+            index[name] = { notes: [], chapters: [], foreshadowing: [], terms: [] };
+          }
+          if (c.note && index[name].notes.indexOf(c.note) === -1) {
+            index[name].notes.push(c.note);
+          }
+          if (index[name].chapters.indexOf(chTitle) === -1) {
+            index[name].chapters.push(chTitle);
+          }
+        });
+        // 收集术语
+        (analysis.terms || []).forEach(function (t) {
+          var term = (t.term || t.name || "").trim();
+          if (!term || term.length < 1 || term.length > 20) return;
+          if (!index[term]) {
+            index[term] = { notes: [], chapters: [], foreshadowing: [], terms: [t.meaning || ""] };
+          }
+        });
+      });
+    }
+    _characterIndex = index;
+  }
+
+  function showCharacterTooltip(name, info, x, y) {
+    dismissTooltip();
+    var tip = document.createElement("div");
+    tip.id = "jl-char-tooltip";
+    var notesHTML = info.notes.slice(0, 3).map(function (n) {
+      return '<span class="jl-ct-note">' + escHtml(n) + '</span>';
+    }).join("");
+    var chaptersHTML = info.chapters.slice(-3).map(function (c) {
+      return '<span class="jl-ct-chapter">📖 ' + escHtml(c) + '</span>';
+    }).join("");
+    var clueHTML = info.foreshadowing.slice(0, 2).map(function (f) {
+      return '<span class="jl-ct-clue">🔍 ' + escHtml(f) + '</span>';
+    }).join("");
+    tip.innerHTML =
+      '<div class="jl-ct-header">' +
+        '<span class="jl-ct-name">' + escHtml(name) + '</span>' +
+        '<button class="jl-ct-close" onclick="dismissTooltip()">×</button>' +
+      '</div>' +
+      (notesHTML ? '<div class="jl-ct-section"><div class="jl-ct-label">角色定位</div>' + notesHTML + '</div>' : '') +
+      (chaptersHTML ? '<div class="jl-ct-section"><div class="jl-ct-label">近期出场</div>' + chaptersHTML + '</div>' : '') +
+      (clueHTML ? '<div class="jl-ct-section"><div class="jl-ct-label">关联线索</div>' + clueHTML + '</div>' : '') +
+      (info.terms.length ? '<div class="jl-ct-section"><div class="jl-ct-label">名词解释</div><span class="jl-ct-note">' + escHtml(info.terms[0]) + '</span></div>' : '') +
+      '<div class="jl-ct-footer">共 ' + info.chapters.length + ' 章出场 · 点击外部关闭</div>';
+    tip.style.cssText = 'position:fixed;z-index:2147483650;width:min(340px,90vw);max-height:420px;overflow-y:auto;background:#fffef9;border:1px solid #D7CCC8;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.16);padding:16px;font-size:13px;animation:jlFadeIn .2s ease';
+    document.body.appendChild(tip);
+    // 定位在选中文字附近
+    var tipW = tip.offsetWidth;
+    var tipH = Math.min(tip.offsetHeight, 420);
+    var left = Math.min(x + 10, window.innerWidth - tipW - 16);
+    var top = y + 20;
+    if (top + tipH > window.innerHeight - 80) top = y - tipH - 10;
+    if (top < 16) top = 16;
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+  }
+
+  window.dismissTooltip = function () {
+    var el = document.getElementById("jl-char-tooltip");
+    if (el) el.remove();
+  };
+
+  document.addEventListener("mouseup", function (e) {
+    setTimeout(function () {
+      var sel = window.getSelection();
+      var text = (sel.toString() || "").trim();
+      // 只匹配 1-10 个字符的人名/术语
+      if (!text || text.length < 1 || text.length > 10) return;
+      if (/[\x00-\x1f<>]/.test(text)) return;
+      // 查找匹配
+      var info = _characterIndex[text];
+      if (!info) {
+        // 模糊匹配（包含关系）
+        var keys = Object.keys(_characterIndex);
+        for (var i = 0; i < keys.length; i++) {
+          if (keys[i].indexOf(text) !== -1 || text.indexOf(keys[i]) !== -1) {
+            info = _characterIndex[keys[i]];
+            text = keys[i];
+            break;
+          }
+        }
+      }
+      if (!info) return;
+      showCharacterTooltip(text, info, e.clientX, e.clientY);
+    }, 50);
+  });
+
+  // 点击其他地方关闭
+  document.addEventListener("mousedown", function (e) {
+    var tip = document.getElementById("jl-char-tooltip");
+    if (!tip) return;
+    if (!tip.contains(e.target)) dismissTooltip();
+  });
+
+  // 每次分析完成后重建人物索引
+  var _origRenderResult = renderResult;
+  renderResult = function (result) {
+    _origRenderResult(result);
+    buildCharacterIndex();
+  };
+
+  // 页面加载时从 localStorage 重建索引
+  (function initCharacterIndex() {
+    var keys = Object.keys(localStorage);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (k.indexOf("JL_Archive_") === 0) {
+        try {
+          var data = JSON.parse(localStorage.getItem(k));
+          if (data && data.characters) {
+            if (!_serverAnalysisMap["_local_" + k]) {
+              _serverAnalysisMap["_local_" + k] = data;
+            }
+          }
+        } catch (_) {}
+      }
+    }
+    buildCharacterIndex();
+  })();
+
   chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {
     if (req.action !== "START_ANALYZE") return;
     const win = createWindow();
