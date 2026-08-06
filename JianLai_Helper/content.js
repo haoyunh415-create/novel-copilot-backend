@@ -1542,17 +1542,35 @@
           var date = a.created_at ? new Date(a.created_at * 1000).toLocaleDateString("zh-CN") : "";
           var hasData = !!_serverAnalysisMap[a.chapter_title || ""];
           var icon = hasData ? "📋" : "🔒";
-          return '<div class="jl-list-item jl-hist-item" data-chapter="' + (a.chapter_title || "") + '" style="font-size:12px;cursor:pointer;transition:background .15s" onmouseover="this.style.background=\'#f4eee8\'" onmouseout="this.style.background=\'\'">' +
+          var srcUrl = (a.source_url || "").replace(/"/g, "&quot;");
+          return '<div class="jl-list-item jl-hist-item" data-chapter="' + (a.chapter_title || "").replace(/"/g, "&quot;") + '" data-url="' + srcUrl + '" style="font-size:12px;cursor:pointer;transition:background .15s" onmouseover="this.style.background=\'#f4eee8\'" onmouseout="this.style.background=\'\'">' +
             icon + ' <b>' + (a.chapter_title || "未知章节") + '</b>' +
             (date ? ' <span style="color:#8b7c72;font-size:11px">' + date + '</span>' : '') +
           '</div>';
         }).join("") +
         '</div>';
 
-      // 绑定点击事件
+      // 绑定点击事件：跳回原章节页面显示分析
       section.querySelectorAll(".jl-hist-item").forEach(function (item) {
         item.addEventListener("click", function () {
-          loadHistoryChapter(this.dataset.chapter);
+          var chapter = this.dataset.chapter;
+          var url = this.dataset.url;
+          // 存储分析数据供目标页面加载后显示
+          if (_serverAnalysisMap[chapter]) {
+            try {
+              sessionStorage.setItem("JL_Pending_Analysis", JSON.stringify({
+                chapter: chapter,
+                data: _serverAnalysisMap[chapter],
+                ts: Date.now()
+              }));
+            } catch (_) {}
+          }
+          // 跳转到原章节页面
+          if (url && url !== location.href) {
+            location.href = url;
+          } else {
+            loadHistoryChapter(chapter);
+          }
         });
       });
 
@@ -1909,6 +1927,48 @@
     link.click();
     URL.revokeObjectURL(url);
   }
+
+  // ═══════════ 页面加载时自动显示跳转过来的历史分析 ═══════════
+  (function checkPendingAnalysis() {
+    try {
+      var raw = sessionStorage.getItem("JL_Pending_Analysis");
+      if (!raw) return;
+      var pending = JSON.parse(raw);
+      // 5 分钟内有效，过期清除
+      if (Date.now() - (pending.ts || 0) > 300000) {
+        sessionStorage.removeItem("JL_Pending_Analysis");
+        return;
+      }
+      sessionStorage.removeItem("JL_Pending_Analysis");
+      // 确认当前页面对应的章节
+      var currentChapter = getChapterTitle();
+      if (pending.chapter !== currentChapter && pending.chapter.indexOf(currentChapter) === -1 && currentChapter.indexOf(pending.chapter) === -1) {
+        // 章节不匹配，不自动显示
+        return;
+      }
+      // 等待页面就绪后显示
+      var attempts = 0;
+      var tryShow = function () {
+        attempts++;
+        var win = document.getElementById("jianlai-helper-window") || createWindow();
+        if (!win) {
+          if (attempts < 10) setTimeout(tryShow, 500);
+          return;
+        }
+        renderResult(pending.data);
+        var meta = document.createElement("div");
+        meta.className = "jl-meta";
+        meta.textContent = "📋 历史分析：" + (pending.chapter || "");
+        var summaryEl = document.getElementById("jl-summary");
+        if (summaryEl && summaryEl.parentElement) {
+          summaryEl.parentElement.insertBefore(meta, summaryEl);
+        }
+        switchPanel("summary");
+      };
+      // 等 300ms 让页面初始化完成
+      setTimeout(tryShow, 300);
+    } catch (_) {}
+  })();
 
   chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {
     if (req.action !== "START_ANALYZE") return;
