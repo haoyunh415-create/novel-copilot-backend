@@ -255,7 +255,7 @@ async function loadRecentAnalyses(token) {
           return a;
         });
         allAnalyses = allAnalyses.concat(items);
-      } catch (_) {}
+      } catch (e) { console.warn("Failed to load analyses for book", books[i]?.id, e); }
     }
 
     if (allAnalyses.length === 0) return;
@@ -280,7 +280,7 @@ async function loadRecentAnalyses(token) {
       '</div>';
     }
     $("recent-list").innerHTML = html;
-  } catch (_) {}
+  } catch (e) { console.error("loadRecentAnalyses failed:", e); }
 }
 
 function escHtml(str) {

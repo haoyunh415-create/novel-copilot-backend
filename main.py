@@ -350,7 +350,15 @@ def _get_cached_analysis(conn, text_hash: str, detail_level: str, spoiler_free: 
         "SELECT result_json FROM analysis_cache WHERE text_hash=? AND detail_level=? AND spoiler_free=?",
         (text_hash, detail_level, spoiler_free),
     ).fetchone()
-    return json.loads(row["result_json"]) if row else None
+    if not row:
+        return None
+    try:
+        return json.loads(row["result_json"])
+    except (json.JSONDecodeError, TypeError):
+        import logging
+        logging.warning("analysis_cache: corrupted result_json for hash=%s detail=%s",
+                        text_hash[:16], detail_level)
+        return None
 
 
 def _cache_analysis(conn, text_hash: str, detail_level: str, spoiler_free: int, result: dict):
@@ -999,7 +1007,10 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
                 (user, content_hash, req.detail_level, spoiler_free),
             ).fetchone()
             if old:
-                cached = json.loads(old["result_json"])
+                try:
+                    cached = json.loads(old["result_json"])
+                except json.JSONDecodeError:
+                    cached = None
     if cached:
         return ok({"result": cached, "cached": True})
 
@@ -1075,13 +1086,19 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
                 int(time.time()),
             ),
         )
-        _cache_analysis(conn, content_hash, req.detail_level, spoiler_free, result)
         # 更新书的章节计数
         if book_id:
             conn.execute(
                 "UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?",
                 (book_id, book_id),
             )
+
+    # 全局缓存在独立事务中写入，失败不回滚分析保存
+    try:
+        with get_db() as conn:
+            _cache_analysis(conn, content_hash, req.detail_level, spoiler_free, result)
+    except Exception:
+        pass
 
     response_data = {"result": result, "cached": False, "book_id": book_id}
     if truncated:
@@ -1158,10 +1175,15 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
         ).fetchone()
         if cached:
             # 缓存命中：不扣额，直接返回 done 事件
-            async def cached_stream():
-                resp = {"type": "done", "data": {"result": json.loads(cached["result_json"]), "cached": True, "book_id": book_id}}
-                yield f"data: {json.dumps(resp, ensure_ascii=False)}\n\n"
-            return StreamingResponse(cached_stream(), media_type="text/event-stream")
+            try:
+                cached_result = json.loads(cached["result_json"])
+            except json.JSONDecodeError:
+                cached_result = None
+            if cached_result:
+                async def cached_stream():
+                    resp = {"type": "done", "data": {"result": cached_result, "cached": True, "book_id": book_id}}
+                    yield f"data: {json.dumps(resp, ensure_ascii=False)}\n\n"
+                return StreamingResponse(cached_stream(), media_type="text/event-stream")
 
         # 自动签到 + 扣额度
         bonus = try_daily_bonus(conn, user)
@@ -1268,7 +1290,7 @@ async def analyze_guest_stream(req: GuestAnalyzeRequest, http_req: Request):
         # 全局缓存检查
         cached = _get_cached_analysis(conn, content_hash, req.detail_level, spoiler_int)
         if cached:
-            log_usage(conn, guest_username, "guest_analyze", f"试用分析(缓存命中): {req.chapter_title}", 0)
+            log_usage(conn, guest_username, "guest_analyze_cached", f"试用分析(缓存命中): {req.chapter_title}", 0)
             remaining = 2 - count
             async def cached_stream():
                 resp = {"type": "done", "data": {"result": cached, "cached": True, "guest_uses_remaining": remaining}}
@@ -1354,7 +1376,11 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
         cached = _get_cached_analysis(conn, content_hash, req.detail_level, spoiler_int)
         if not cached:
             old = conn.execute("SELECT result_json FROM analyses WHERE username=? AND text_hash=? AND detail_level=? AND spoiler_free=?", (user, content_hash, req.detail_level, spoiler_int)).fetchone()
-            if old: cached = json.loads(old["result_json"])
+            if old:
+                try:
+                    cached = json.loads(old["result_json"])
+                except json.JSONDecodeError:
+                    cached = None
         if cached:
             async def ce(): yield f"data: {json.dumps({'type': 'done', 'data': {'result': cached, 'cached': True, 'book_id': book_id}}, ensure_ascii=False)}\n\n"
             return StreamingResponse(ce(), media_type="text/event-stream")
@@ -1431,7 +1457,7 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
         # 全局缓存检查
         cached = _get_cached_analysis(conn, content_hash, req.detail_level, spoiler_int)
         if cached:
-            log_usage(conn, guest_username, "guest_analyze", f"试用分析(缓存命中): {req.chapter_title}", 0)
+            log_usage(conn, guest_username, "guest_analyze_cached", f"试用分析(缓存命中): {req.chapter_title}", 0)
             remaining = 2 - count
             async def ce():
                 resp = {"type": "done", "data": {"result": cached, "cached": True, "guest_uses_remaining": remaining}}
@@ -1509,7 +1535,7 @@ def analyze_guest(req: GuestAnalyzeRequest, http_req: Request):
         # 全局缓存检查
         cached = _get_cached_analysis(conn, content_hash, req.detail_level, 1 if req.spoiler_free else 0)
         if cached:
-            log_usage(conn, guest_username, "guest_analyze", f"试用分析(缓存命中): {req.chapter_title}", 0)
+            log_usage(conn, guest_username, "guest_analyze_cached", f"试用分析(缓存命中): {req.chapter_title}", 0)
             return ok({"result": cached, "cached": True, "guest_uses_remaining": 2 - count})
 
     if count >= 3:
@@ -1543,7 +1569,13 @@ def analyze_guest(req: GuestAnalyzeRequest, http_req: Request):
     with get_db() as conn:
         log_usage(conn, guest_username, "guest_analyze",
                   f"试用分析: {req.chapter_title}", 0)
-        _cache_analysis(conn, content_hash, req.detail_level, 1 if req.spoiler_free else 0, result)
+
+    # 全局缓存在独立事务中写入，失败不影响使用记录
+    try:
+        with get_db() as conn:
+            _cache_analysis(conn, content_hash, req.detail_level, 1 if req.spoiler_free else 0, result)
+    except Exception:
+        pass
 
     response_data = {
         "result": result,
@@ -2325,13 +2357,15 @@ def admin_stats(_admin=Depends(verify_admin)):
             "SELECT COUNT(DISTINCT username) FROM usage_logs WHERE action='guest_analyze'"
         ).fetchone()[0]
 
+        # TODO: 访客转化追踪需要 schema 变更——在注册时传递 guest ID 并在 users 表关联
+        # 当前 guest 身份是设备随机字符串（如 guest:g_xxx），无法与注册用户名匹配
         guest_to_reg = conn.execute(
             """
             SELECT COUNT(DISTINCT u.username) FROM users u
             WHERE EXISTS (
                 SELECT 1 FROM usage_logs ul
                 WHERE ul.action='guest_analyze'
-                AND 'guest:' || u.username = ul.username
+                AND u.username = REPLACE(ul.username, 'guest:', '')
             )
             """
         ).fetchone()[0]
@@ -2801,7 +2835,7 @@ function renderStats(data) {
     type: "bar",
     data: {
       labels: platLabels,
-      datasets: [{ label: "用户数", data: platValues, backgroundColor: "#8d6e63" }]
+      datasets: [{ label: "书籍数", data: platValues, backgroundColor: "#8d6e63" }]
     },
     options: {
       responsive: true,
