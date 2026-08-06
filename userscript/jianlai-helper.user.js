@@ -415,6 +415,12 @@
     return list;
   }
 
+  function escHtml(str) {
+    var div = document.createElement("div");
+    div.appendChild(document.createTextNode(str || ""));
+    return div.innerHTML;
+  }
+
   // ═══════════ 新手引导 ═══════════
 
   function showOnboarding() {
