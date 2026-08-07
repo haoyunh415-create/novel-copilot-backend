@@ -9,6 +9,7 @@
   let _currentBookId = null;
   let _currentBookTitle = null;
   let _graphMode = "chapter";  // "chapter" | "book"
+  let _historySortMode = (function () { try { return localStorage.getItem("JL_HistSort") || "time"; } catch (_) { return "time"; } })();
   let _lastFailedQuestion = null;
   let _serverAnalysisMap = {};  // 章节→服务端分析数据映射
 
@@ -1589,15 +1590,33 @@
         }
       });
 
-      // 在概况面板底部插入历史章节列表
-      var section = document.createElement("div");
-      section.id = "jl-history-section";
-      section.className = "jl-card";
-      section.innerHTML =
-        '<h3>📚 本书已分析 ' + analyses.length + ' 章</h3>' +
-        '<p style="font-size:10px;color:#8b7c72;margin:2px 0 6px">点击章节查看 · 🗑️ 删除（服务端同步）</p>' +
-        '<div style="max-height:200px;overflow-y:auto;margin-top:8px">' +
-        analyses.slice(-20).reverse().map(function (a) {
+      // 排序逻辑
+      function sortAnalyses(list, mode) {
+        var sorted = list.slice();
+        if (mode === "chapter") {
+          sorted.sort(function (a, b) {
+            var ai = a.chapter_index, bi = b.chapter_index;
+            if (ai == null && bi == null) return b.created_at - a.created_at;
+            if (ai == null) return 1;
+            if (bi == null) return -1;
+            return ai - bi;
+          });
+        } else {
+          sorted.sort(function (a, b) { return b.created_at - a.created_at; });
+        }
+        return sorted;
+      }
+
+      function renderHistList(section, analyses) {
+        var listDiv = section.querySelector("#jl-hist-list");
+        if (!listDiv) {
+          listDiv = document.createElement("div");
+          listDiv.id = "jl-hist-list";
+          listDiv.style.cssText = "max-height:200px;overflow-y:auto;margin-top:8px";
+          section.appendChild(listDiv);
+        }
+        var display = sortAnalyses(analyses, _historySortMode).slice(0, 50);
+        listDiv.innerHTML = display.map(function (a) {
           var date = a.created_at ? new Date(a.created_at * 1000).toLocaleDateString("zh-CN") : "";
           var hasData = !!_serverAnalysisMap[a.chapter_title || ""];
           var icon = hasData ? "📋" : "🔒";
@@ -1607,23 +1626,67 @@
             (date ? ' <span style="color:#8b7c72;font-size:11px">' + date + '</span>' : '') + '</span>' +
             '<span class="jl-hist-del" data-id="' + a.id + '" style="cursor:pointer;opacity:0.35;font-size:13px;flex-shrink:0;margin-left:6px" title="删除此分析">🗑️</span>' +
           '</div>';
-        }).join("") +
-        '</div>';
-
-      // 绑定点击事件：查看历史 or 删除
-      section.querySelectorAll(".jl-hist-item").forEach(function (item) {
-        item.addEventListener("click", function (e) {
-          if (e.target.closest(".jl-hist-del")) {
-            var id = parseInt(e.target.closest(".jl-hist-del").dataset.id);
-            if (id && confirm("确定删除「" + (item.querySelector("b") || {}).textContent + "」的分析记录？")) {
-              deleteAnalysis(id, item);
+        }).join("");
+        // 重新绑定事件
+        listDiv.querySelectorAll(".jl-hist-item").forEach(function (item) {
+          item.addEventListener("click", function (e) {
+            if (e.target.closest(".jl-hist-del")) {
+              var id = parseInt(e.target.closest(".jl-hist-del").dataset.id);
+              if (id && confirm("确定删除「" + (item.querySelector("b") || {}).textContent + "」的分析记录？")) {
+                deleteAnalysis(id, item);
+              }
+              return;
             }
-            return;
-          }
-          loadHistoryChapter(this.dataset.chapter);
-          var main = document.querySelector(".jl-main");
-          if (main) main.scrollTop = 0;
+            loadHistoryChapter(this.dataset.chapter);
+            var main = document.querySelector(".jl-main");
+            if (main) main.scrollTop = 0;
+          });
         });
+      }
+
+      function updateSortButtons(section) {
+        var timeBtn = section.querySelector("#jl-sort-time");
+        var chapBtn = section.querySelector("#jl-sort-chapter");
+        if (!timeBtn || !chapBtn) return;
+        if (_historySortMode === "chapter") {
+          chapBtn.style.background = "#5D4037"; chapBtn.style.color = "#fff";
+          timeBtn.style.background = "#E8DDD2"; timeBtn.style.color = "#5D4037";
+        } else {
+          timeBtn.style.background = "#5D4037"; timeBtn.style.color = "#fff";
+          chapBtn.style.background = "#E8DDD2"; chapBtn.style.color = "#5D4037";
+        }
+      }
+
+      // 在概况面板底部插入历史章节列表
+      var section = document.createElement("div");
+      section.id = "jl-history-section";
+      section.className = "jl-card";
+      section.innerHTML =
+        '<h3 style="display:flex;justify-content:space-between;align-items:center">' +
+          '<span>📚 本书已分析 ' + analyses.length + ' 章</span>' +
+          '<span style="font-size:11px;font-weight:normal">' +
+            '<button id="jl-sort-time" class="jl-sort-btn" style="cursor:pointer;border:1px solid #a1887f;padding:1px 8px;border-radius:10px;margin:0 2px;font-size:10px">⏱ 按时间</button>' +
+            '<button id="jl-sort-chapter" class="jl-sort-btn" style="cursor:pointer;border:1px solid #a1887f;padding:1px 8px;border-radius:10px;margin:0 2px;font-size:10px">📖 按章节</button>' +
+          '</span>' +
+        '</h3>' +
+        '<p style="font-size:10px;color:#8b7c72;margin:2px 0 6px">点击章节查看 · 🗑️ 删除（服务端同步）</p>';
+
+      // 渲染列表
+      renderHistList(section, analyses);
+      updateSortButtons(section);
+
+      // 排序切换事件
+      section.querySelector("#jl-sort-time").addEventListener("click", function () {
+        _historySortMode = "time";
+        try { localStorage.setItem("JL_HistSort", "time"); } catch (_) {}
+        renderHistList(section, analyses);
+        updateSortButtons(section);
+      });
+      section.querySelector("#jl-sort-chapter").addEventListener("click", function () {
+        _historySortMode = "chapter";
+        try { localStorage.setItem("JL_HistSort", "chapter"); } catch (_) {}
+        renderHistList(section, analyses);
+        updateSortButtons(section);
       });
 
       var cards = panel.querySelectorAll(".jl-card");
