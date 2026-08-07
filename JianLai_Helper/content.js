@@ -637,6 +637,7 @@
     }));
 
     const edges = Array.isArray(graph.edges) ? graph.edges : [];
+    if (network) { network.destroy(); network = null; }
     network = new vis.Network(graphBox, { nodes, edges }, {
       edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
       physics: { stabilization: true },
@@ -647,7 +648,11 @@
   function renderChapterGraph() {
     // 从最后一次分析结果渲染当前章节关系图
     var graphBox = document.getElementById("jl-graph");
-    if (!graphBox || !window.vis) return;
+    if (!graphBox) return;
+    if (!window.vis) {
+      graphBox.innerHTML = '<div class="jl-ov-empty">图表库加载中，请稍后再试</div>';
+      return;
+    }
 
     var key = storageKey();
     var raw;
@@ -682,6 +687,7 @@
       };
     });
     var edges = Array.isArray(graph.edges) ? graph.edges : [];
+    if (network) { network.destroy(); network = null; }
     network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
       edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
       physics: { stabilization: true, barnesHut: { gravitationalConstant: -2000, springLength: 200 } },
@@ -1798,6 +1804,7 @@
 
       graphBox.innerHTML = "";
       graphBox.style.height = "560px";
+      if (network) { network.destroy(); network = null; }
       network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
         edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
         physics: { stabilization: true, barnesHut: { gravitationalConstant: -2000, springLength: 200 } },

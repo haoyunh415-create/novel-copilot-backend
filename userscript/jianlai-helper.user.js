@@ -970,6 +970,7 @@
     }));
 
     const edges = Array.isArray(graph.edges) ? graph.edges : [];
+    if (network) { network.destroy(); network = null; }
     network = new vis.Network(graphBox, { nodes, edges }, {
       edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
       physics: { stabilization: true },
@@ -1016,6 +1017,7 @@
       };
     });
     var edges = Array.isArray(graph.edges) ? graph.edges : [];
+    if (network) { network.destroy(); network = null; }
     network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
       edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
       physics: { stabilization: true, barnesHut: { gravitationalConstant: -2000, springLength: 200 } },
@@ -1897,7 +1899,8 @@
 
       graphBox.innerHTML = "";
       graphBox.style.height = "560px";
-      network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
+      if (network) { network.destroy(); network = null; }
+    network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
         edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
         physics: { stabilization: true, barnesHut: { gravitationalConstant: -2000, springLength: 200 } },
         interaction: { hover: true, tooltipDelay: 200 }
