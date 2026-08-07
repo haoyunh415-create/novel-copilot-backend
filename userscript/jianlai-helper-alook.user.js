@@ -1691,24 +1691,31 @@
       section.className = "jl-card";
       section.innerHTML =
         '<h3>📚 本书已分析 ' + analyses.length + ' 章</h3>' +
-        '<p style="font-size:10px;color:#8b7c72;margin:2px 0 6px">点击章节可查看分析结果（服务端同步）</p>' +
+        '<p style="font-size:10px;color:#8b7c72;margin:2px 0 6px">点击章节查看 · 🗑️ 删除（服务端同步）</p>' +
         '<div style="max-height:200px;overflow-y:auto;margin-top:8px">' +
         analyses.slice(-20).reverse().map(function (a) {
           var date = a.created_at ? new Date(a.created_at * 1000).toLocaleDateString("zh-CN") : "";
           var hasData = !!_serverAnalysisMap[a.chapter_title || ""];
           var icon = hasData ? "📋" : "🔒";
-          return '<div class="jl-list-item jl-hist-item" data-chapter="' + (a.chapter_title || "").replace(/"/g, "&quot;") + '" style="font-size:12px;cursor:pointer;transition:background .15s" onmouseover="this.style.background=\'#f4eee8\'" onmouseout="this.style.background=\'\'">' +
-            icon + ' <b>' + (a.chapter_title || "未知章节") + '</b>' +
-            (date ? ' <span style="color:#8b7c72;font-size:11px">' + date + '</span>' : '') +
+          return '<div class="jl-list-item jl-hist-item" data-chapter="' + (a.chapter_title || "").replace(/"/g, "&quot;") + '" data-id="' + a.id + '" style="font-size:12px;cursor:pointer;transition:background .15s;display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background=\'#f4eee8\'" onmouseout="this.style.background=\'\'">' +
+            '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + icon + ' <b>' + (a.chapter_title || "未知章节") + '</b>' +
+            (date ? ' <span style="color:#8b7c72;font-size:11px">' + date + '</span>' : '') + '</span>' +
+            '<span class="jl-hist-del" data-id="' + a.id + '" style="cursor:pointer;opacity:0.35;font-size:13px;flex-shrink:0;margin-left:6px" title="删除此分析">🗑️</span>' +
           '</div>';
         }).join("") +
         '</div>';
 
-      // 绑定点击事件：显示分析结果并滚动到顶部
+      // 绑定点击事件：查看历史 or 删除
       section.querySelectorAll(".jl-hist-item").forEach(function (item) {
-        item.addEventListener("click", function () {
+        item.addEventListener("click", function (e) {
+          if (e.target.closest(".jl-hist-del")) {
+            var id = parseInt(e.target.closest(".jl-hist-del").dataset.id);
+            if (id && confirm("确定删除「" + (item.querySelector("b") || {}).textContent + "」的分析记录？")) {
+              deleteAnalysis(id, item);
+            }
+            return;
+          }
           loadHistoryChapter(this.dataset.chapter);
-          // 滚动到概况面板顶部
           var main = document.querySelector(".jl-main");
           if (main) main.scrollTop = 0;
         });
@@ -1723,6 +1730,33 @@
       }
     } catch (_) {
       // 静默失败，不影响主流程
+    }
+  }
+
+  async function deleteAnalysis(analysisId, domItem) {
+    var API = await getAPI();
+    var token = await getToken();
+    if (!token) { alert("请先登录"); return; }
+    try {
+      var resp = await fetch(API + "/api/analyses/" + analysisId, {
+        method: "DELETE",
+        headers: { Authorization: "Bearer " + token }
+      });
+      var payload = await resp.json();
+      if (!payload.success) { alert(payload.error || "删除失败"); return; }
+      if (domItem) {
+        domItem.style.transition = "opacity .3s";
+        domItem.style.opacity = "0";
+        setTimeout(function () { if (domItem.parentNode) domItem.remove(); }, 300);
+      }
+      var section = document.getElementById("jl-history-section");
+      if (section) {
+        var h3 = section.querySelector("h3");
+        var remaining = section.querySelectorAll(".jl-hist-item").length;
+        if (h3) h3.textContent = "📚 本书已分析 " + remaining + " 章";
+      }
+    } catch (e) {
+      alert("删除失败: " + (e.message || "网络错误"));
     }
   }
 
