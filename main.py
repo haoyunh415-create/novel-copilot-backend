@@ -1446,9 +1446,11 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                 df = executor.submit(analyze_details_only, analysis_text, req.chapter_title, req.spoiler_free)
 
                 # 摘要先出（失败时用兜底文案）
+                ai_error = False
                 try:
                     summary = sf.result()
                 except Exception as e:
+                    ai_error = True
                     import logging, traceback
                     logging.warning("analyze_progressive: summary call failed for user=%s: %s", user[:16] if len(user) > 16 else user, str(e)[:200])
                     summary = {"summary": f"AI 服务暂时不可用（{str(e)[:100]}），请稍后重试。持续失败请联系客服 QQ：2313370765"}
@@ -1459,6 +1461,7 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                 try:
                     details = df.result()
                 except Exception as e:
+                    ai_error = True
                     import logging
                     logging.warning("analyze_progressive: details call failed for user=%s: %s", user[:16] if len(user) > 16 else user, str(e)[:200])
                     details = {"characters": [], "foreshadowing": [], "terms": [], "graph": {"nodes": [], "edges": []}}
@@ -1469,7 +1472,7 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                     with get_db() as db_conn:
                         db_conn.execute("INSERT OR REPLACE INTO analyses (username, book_id, chapter_title, chapter_index, source_url, text_hash, detail_level, spoiler_free, result_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (user, book_id, req.chapter_title, req.chapter_index, req.source_url, content_hash, req.detail_level, spoiler_int, json.dumps(result, ensure_ascii=False), int(time.time())))
                         if book_id: db_conn.execute("UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?", (book_id, book_id))
-                        _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
+                        if not ai_error: _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
                 except Exception:
                     import logging
                     logging.warning("analyze_progressive: failed to save analysis for user=%s", user[:16] if len(user) > 16 else user)
@@ -1533,9 +1536,11 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
                 df = executor.submit(analyze_details_only, analysis_text, req.chapter_title, req.spoiler_free)
 
                 # 摘要先出（失败时用兜底文案）
+                ai_error = False
                 try:
                     summary = sf.result()
                 except Exception as e:
+                    ai_error = True
                     import logging
                     logging.warning("analyze_guest_progressive: summary call failed for guest=%s: %s", guest_username[:16], str(e)[:200])
                     summary = {"summary": f"AI 服务暂时不可用（{str(e)[:100]}），请稍后重试。持续失败请联系客服 QQ：2313370765"}
@@ -1546,6 +1551,7 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
                 try:
                     details = df.result()
                 except Exception:
+                    ai_error = True
                     import logging
                     logging.warning("analyze_guest_progressive: details call failed for guest=%s: %s", guest_username[:16], str(e)[:200])
                     details = {"characters": [], "foreshadowing": [], "terms": [], "graph": {"nodes": [], "edges": []}}
@@ -1555,7 +1561,7 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
                 try:
                     with get_db() as db_conn:
                         log_usage(db_conn, guest_username, "guest_analyze", f"试用分析: {req.chapter_title}", 0)
-                        _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
+                        if not ai_error: _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
                 except Exception:
                     import logging
                     logging.warning("analyze_guest_progressive: failed to save result for guest=%s", guest_username[:16])
@@ -1964,6 +1970,22 @@ def list_book_analyses(book_id: int, user=Depends(get_user), limit: int = None):
 
     analyses = [dict(row) for row in rows]
     return ok({"book": dict(book), "analyses": analyses})
+
+
+@app.delete("/api/analyses/{analysis_id}")
+def delete_analysis(analysis_id: int, user=Depends(get_user)):
+    """删除单条分析记录（仅限本人）"""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT a.id, b.username FROM analyses a JOIN books b ON a.book_id = b.id WHERE a.id = ?",
+            (analysis_id,),
+        ).fetchone()
+        if not row:
+            return fail("分析记录不存在")
+        if row["username"] != user:
+            return fail("无权删除他人的分析记录")
+        conn.execute("DELETE FROM analyses WHERE id = ?", (analysis_id,))
+    return ok({"deleted": analysis_id})
 
 
 @app.post("/api/review")
