@@ -1695,7 +1695,7 @@
         '<h3>📚 本书已分析 ' + analyses.length + ' 章</h3>' +
         '<p style="font-size:10px;color:#8b7c72;margin:2px 0 6px">点击章节查看 · 🗑️ 删除（服务端同步）</p>' +
         '<div style="max-height:200px;overflow-y:auto;margin-top:8px">' +
-        analyses.map(function (a) {
+        analyses.slice(-20).reverse().map(function (a) {
           var date = a.created_at ? new Date(a.created_at * 1000).toLocaleDateString("zh-CN") : "";
           var hasData = !!_serverAnalysisMap[a.chapter_title || ""];
           var icon = hasData ? "📋" : "🔒";
