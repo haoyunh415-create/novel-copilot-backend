@@ -282,11 +282,14 @@ def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = Tru
 
     try:
         raw = payload["choices"][0]["message"]["content"]
+        if not raw or not str(raw).strip():
+            raise RuntimeError("AI 返回空内容，可能触发内容安全过滤，请稍后重试")
         return _extract_json(raw)
     except Exception:
         # 兜底：JSON 解析失败时，用清理后的纯文本作为摘要
-        clean_summary = _raw_to_plain_text(raw) if raw else "分析失败"
-        return {"summary": clean_summary}
+        if isinstance(locals().get("raw"), str) and locals().get("raw", "").strip():
+            return {"summary": _raw_to_plain_text(raw)}
+        raise  # raw 为空 → 抛出异常让调用方处理（不缓存）
 
 
 def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = True):
