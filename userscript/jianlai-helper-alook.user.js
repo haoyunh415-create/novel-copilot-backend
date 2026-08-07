@@ -1702,21 +1702,20 @@
       function chineseToNumber(s) {
         var map = {零:0,一:1,二:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9,
                    十:10,百:100,千:1000,万:10000};
-        if (s.length === 1) return map[s] != null ? map[s] : null;
-        if (s === "十") return 10;
-        var result = 0, section = 0, i = 0;
-        while (i < s.length) {
+        var result = 0, temp = 0;
+        for (var i = 0; i < s.length; i++) {
           var ch = s[i], val = map[ch];
           if (val == null) return null;
           if (val >= 10) {
-            section = (section || 1) * val;
-            if (val >= 10000) { result += section; section = 0; }
+            if (temp === 0) temp = 1;
+            temp = temp * val;
+            if (val >= 10000) { result += temp; temp = 0; }
           } else {
-            section = val;
+            result += temp;
+            temp = val;
           }
-          i++;
         }
-        return result + section;
+        return result + temp;
       }
 
       function sortAnalyses(list, mode) {
