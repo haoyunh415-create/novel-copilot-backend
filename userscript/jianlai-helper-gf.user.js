@@ -1697,11 +1697,42 @@
       });
 
       // 排序逻辑
+      // 从章节标题提取序号（支持"第123章"阿拉伯数字和"第十二章"中文数字）
+      function extractChapterNumber(title) {
+        if (!title) return null;
+        var m = title.match(/第\s*(\d+)\s*章/);
+        if (m) return parseInt(m[1], 10);
+        m = title.match(/第\s*([一二三四五六七八九十百千万零]+)\s*章/);
+        if (m) return chineseToNumber(m[1]);
+        return null;
+      }
+
+      function chineseToNumber(s) {
+        var map = {零:0,一:1,二:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9,
+                   十:10,百:100,千:1000,万:10000};
+        if (s.length === 1) return map[s] != null ? map[s] : null;
+        if (s === "十") return 10;
+        var result = 0, section = 0, i = 0;
+        while (i < s.length) {
+          var ch = s[i], val = map[ch];
+          if (val == null) return null;
+          if (val >= 10) {
+            section = (section || 1) * val;
+            if (val >= 10000) { result += section; section = 0; }
+          } else {
+            section = val;
+          }
+          i++;
+        }
+        return result + section;
+      }
+
       function sortAnalyses(list, mode) {
         var sorted = list.slice();
         if (mode === "chapter") {
           sorted.sort(function (a, b) {
-            var ai = a.chapter_index, bi = b.chapter_index;
+            var ai = extractChapterNumber(a.chapter_title);
+            var bi = extractChapterNumber(b.chapter_title);
             if (ai == null && bi == null) return b.created_at - a.created_at;
             if (ai == null) return 1;
             if (bi == null) return -1;
