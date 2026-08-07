@@ -622,7 +622,7 @@
 
   function drawGraph(graph) {
     const graphBox = document.getElementById("jl-graph");
-    if (!graphBox || !window.vis || !Array.isArray(graph?.nodes)) return;
+    if (!graphBox || !window.vis || !Array.isArray(graph?.nodes) || graph.nodes.length === 0) return;
 
     const nodes = graph.nodes.map((node) => ({
       ...node,

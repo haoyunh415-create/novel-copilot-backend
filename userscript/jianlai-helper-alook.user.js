@@ -956,7 +956,7 @@
 
   function drawGraph(graph) {
     const graphBox = document.getElementById("jl-graph");
-    if (!graphBox || !Array.isArray(graph?.nodes)) return;
+    if (!graphBox || !Array.isArray(graph?.nodes) || graph.nodes.length === 0) return;
     if (!window.vis) { renderGraphAsText(graphBox, graph); return; }
 
     const nodes = graph.nodes.map((node) => ({
