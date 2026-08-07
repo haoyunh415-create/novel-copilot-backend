@@ -1703,12 +1703,13 @@
         '<h3>📚 本书已分析 ' + analyses.length + ' 章</h3>' +
         '<p style="font-size:10px;color:#8b7c72;margin:2px 0 6px">点击章节查看 · 🗑️ 删除（服务端同步）</p>' +
         '<div style="max-height:200px;overflow-y:auto;margin-top:8px">' +
-        analyses.slice(-20).reverse().map(function (a) {
+        analyses.map(function (a) {
           var date = a.created_at ? new Date(a.created_at * 1000).toLocaleDateString("zh-CN") : "";
           var hasData = !!_serverAnalysisMap[a.chapter_title || ""];
           var icon = hasData ? "📋" : "🔒";
+          var num = a.chapter_index != null ? "#" + a.chapter_index + " " : "";
           return '<div class="jl-list-item jl-hist-item" data-chapter="' + (a.chapter_title || "").replace(/"/g, "&quot;") + '" data-id="' + a.id + '" style="font-size:12px;cursor:pointer;transition:background .15s;display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background=\'#f4eee8\'" onmouseout="this.style.background=\'\'">' +
-            '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + icon + ' <b>' + (a.chapter_title || "未知章节") + '</b>' +
+            '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + icon + ' <b>' + num + (a.chapter_title || "未知章节") + '</b>' +
             (date ? ' <span style="color:#8b7c72;font-size:11px">' + date + '</span>' : '') + '</span>' +
             '<span class="jl-hist-del" data-id="' + a.id + '" style="cursor:pointer;opacity:0.35;font-size:13px;flex-shrink:0;margin-left:6px" title="删除此分析">🗑️</span>' +
           '</div>';
