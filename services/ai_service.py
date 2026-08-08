@@ -224,8 +224,8 @@ def analyze_text(text: str, chapter_title: str, detail_level: str = "standard", 
 
 输出要求（严格 JSON，不能有任何其他内容）：
 1. {summary_rule}
-2. characters：列出 1-5 个关键人物。每人包含 name（名称）和 note（动向，15字以内）。正文乱码则返回空数组 []
-3. foreshadowing：列出 0-3 条线索。每条含 clue（描述）、reason（为什么是伏笔，20字以内）、confidence（0-100）
+2. characters：至少 1 个，最多 5 个关键人物。每人包含 name（名称）和 note（动向，15字以内）。即使出场人物少也要标注最重要的 1 个。正文乱码则返回空数组 []
+3. foreshadowing：0-3 条线索。每条含 clue（描述）、reason（为什么是伏笔，20字以内）、confidence（0-100）。有值得关注的细节就标，尽量不空
 4. terms：列出 0-3 个关键术语。每条含 term（术语）和 meaning（含义）
 5. graph.nodes：与 characters 一致，每人 id、label、level（core/normal）
 6. graph.edges：人物关系边，from、to、label（如"师徒""敌对"）
@@ -239,7 +239,7 @@ JSON 结构：
     payload = _call_ai([
         {"role": "system", "content": "你是一个专业的小说分析助手，只返回符合要求的 JSON，不输出任何其他内容。"},
         {"role": "user", "content": prompt},
-    ], temperature=0.2, timeout=35, max_tokens=2048)
+    ], temperature=0.2, timeout=35, max_tokens=4096)
 
     try:
         raw = payload["choices"][0]["message"]["content"]
@@ -278,7 +278,7 @@ def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = Tru
     payload = _call_ai([
         {"role": "system", "content": "你是一个专业的小说分析助手，只返回 JSON。"},
         {"role": "user", "content": prompt},
-    ], temperature=0.2, timeout=20, max_retries=2, max_tokens=512)
+    ], temperature=0.2, timeout=25, max_retries=2, max_tokens=1024)
 
     try:
         raw = payload["choices"][0]["message"]["content"]
@@ -305,17 +305,17 @@ def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = Tru
 
     prompt = f"""章节标题：{chapter_title}。{spoiler_rule}
 分析以下内容，严格按 JSON 返回（只输出 JSON，不要任何其他文字）：
-- characters：1-5 个关键人物（name + note 10字以内）
-- foreshadowing：0-3 条伏笔线索（clue + reason 15字以内 + confidence 0-100）
+- characters：至少列出 1 个关键人物，最多 5 个。即使章节出场人物少，也要至少标注本章最重要的 1 个人物（name + note 15字以内，说明其本章动向和重要性）
+- foreshadowing：0-3 条伏笔线索。如果章节有值得关注的细节、反常事件、暗示未来发展的内容，请标注（clue + reason 15字以内 + confidence 0-100）。尽量不要返回空数组
 - terms：0-3 个关键术语（term + meaning）
-- graph：人物关系 nodes（id、label、level）+ edges（from、to、label）
+- graph：人物关系 nodes（id=n1,n2...、label、level=core/normal）+ edges（from、to、label），至少要有 1 个 node
 JSON 格式：{{{{"characters":[{{{{"name":"","note":""}}}}],"foreshadowing":[{{{{"clue":"","reason":"","confidence":70}}}}],"terms":[{{{{"term":"","meaning":""}}}}],"graph":{{{{"nodes":[{{{{"id":"n1","label":"","level":"core"}}}}],"edges":[{{{{"from":"n1","to":"n2","label":""}}}}]}}}}}}}}
 正文：{text}"""
 
     payload = _call_ai([
         {"role": "system", "content": "你是一个专业的小说分析助手，只返回 JSON，不输出任何其他内容。"},
         {"role": "user", "content": prompt},
-    ], temperature=0.2, timeout=30, max_retries=2, max_tokens=1536)
+    ], temperature=0.2, timeout=30, max_retries=2, max_tokens=2048)
 
     try:
         raw = payload["choices"][0]["message"]["content"]
@@ -357,8 +357,8 @@ def analyze_text_stream(text: str, chapter_title: str, detail_level: str = "stan
 
 输出要求（严格 JSON）：
 1. {summary_rule}
-2. characters：1-5 个关键人物（name + note 15字以内）
-3. foreshadowing：0-3 条线索（clue + reason 20字以内 + confidence 0-100）
+2. characters：至少 1 个，最多 5 个关键人物（name + note 15字以内）。即使出场人物少也要标注最重要的 1 个
+3. foreshadowing：0-3 条线索（clue + reason 20字以内 + confidence 0-100）。有值得关注的细节就标，尽量不空
 4. terms：0-3 个关键术语（term + meaning）
 5. graph.nodes：与 characters 一致，每人 id、label、level（core/normal）
 6. graph.edges：人物关系边 from、to、label
@@ -386,6 +386,7 @@ JSON 结构：
                 ],
                 "temperature": 0.2,
                 "stream": True,
+                "max_tokens": 4096,
             },
             timeout=(10, 60),
             stream=True,
