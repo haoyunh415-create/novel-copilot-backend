@@ -272,23 +272,21 @@ def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = Tru
     text = text[:8000] if len(text) > 8000 else text
 
     prompt = f"""章节标题：{chapter_title}。{spoiler_rule}
-{summary_rule}。只返回 JSON：{{{{"summary":"..."}}}}。
+{summary_rule}
+不要输出 JSON，直接返回纯文本摘要，不要任何格式标记和前缀。
 正文：{text}"""
 
     payload = _call_ai([
-        {"role": "system", "content": "你是一个专业的小说分析助手，只返回 JSON。"},
+        {"role": "system", "content": "你是一个专业的小说分析助手。只返回摘要纯文本，不输出 JSON，不加前缀或解释。"},
         {"role": "user", "content": prompt},
-    ], temperature=0.2, timeout=25, max_retries=2, max_tokens=1024)
+    ], temperature=0.2, timeout=30, max_retries=2, max_tokens=2048)
 
-    try:
-        raw = payload["choices"][0]["message"]["content"]
-        if not raw or not str(raw).strip():
-            raise RuntimeError("AI 返回空内容，可能触发内容安全过滤，请稍后重试")
-        return _extract_json(raw)
-    except Exception:
-        # 兜底：JSON 解析失败时，用清理后的纯文本作为摘要
-        if isinstance(locals().get("raw"), str) and locals().get("raw", "").strip():
-            return {"summary": _raw_to_plain_text(raw)}
+    raw = payload["choices"][0]["message"]["content"]
+    if not raw or not str(raw).strip():
+        raise RuntimeError("AI 返回空内容，可能触发内容安全过滤，请稍后重试")
+    # 直接返回纯文本，不再走 JSON 解析
+    summary = _strip_ai_chatter(raw).strip()
+    return {"summary": summary}
         raise  # raw 为空 → 抛出异常让调用方处理（不缓存）
 
 
