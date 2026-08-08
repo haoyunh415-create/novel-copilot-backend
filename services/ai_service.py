@@ -287,7 +287,6 @@ def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = Tru
     # 直接返回纯文本，不再走 JSON 解析
     summary = _strip_ai_chatter(raw).strip()
     return {"summary": summary}
-        raise  # raw 为空 → 抛出异常让调用方处理（不缓存）
 
 
 def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = True):
