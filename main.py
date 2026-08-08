@@ -1455,9 +1455,13 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                     summary = sf.result()
                 except Exception as e:
                     ai_error = True
-                    import logging, traceback
+                    import logging
                     logging.warning("analyze_progressive: summary call failed for user=%s: %s", user[:16] if len(user) > 16 else user, str(e)[:200])
-                    summary = {"summary": f"AI 服务暂时不可用（{str(e)[:100]}），请稍后重试。持续失败请联系客服 QQ：2313370765"}
+                    err_msg = str(e)
+                    if "安全过滤" in err_msg or "内容安全" in err_msg:
+                        summary = {"summary": f"⚠️ {err_msg[:200]}"}
+                    else:
+                        summary = {"summary": f"AI 服务暂时不可用，请稍后重试。持续失败请联系客服 QQ：2313370765"}
                 yield f"data: {json.dumps({'type': 'summary', 'data': summary}, ensure_ascii=False)}\n\n"
                 await asyncio.sleep(0.5)  # 让用户看清摘要再更新详情
 

@@ -113,7 +113,7 @@ def _fix_json_aggressive(text: str) -> str:
 
 
 def _call_ai(messages: list[dict], temperature: float = 0.2, timeout: int = 35, max_retries: int = 2, max_tokens: int = None):
-    """调用 AI API，带自动重试"""
+    """调用 AI API，带自动重试。返回 (response_json, finish_reason) 元组"""
     last_error = None
     for attempt in range(max_retries):
         try:
@@ -134,7 +134,9 @@ def _call_ai(messages: list[dict], temperature: float = 0.2, timeout: int = 35, 
                 timeout=timeout,
             )
             response.raise_for_status()
-            return response.json()
+            payload = response.json()
+            choice = (payload.get("choices") or [{}])[0]
+            return payload, choice.get("finish_reason", "stop")
         except requests.Timeout:
             last_error = RuntimeError("AI 服务响应超时，请缩短章节内容或稍后重试")
             if attempt < max_retries - 1:
@@ -236,7 +238,7 @@ JSON 结构：
 正文：
 {text}"""
 
-    payload = _call_ai([
+    payload, _finish = _call_ai([
         {"role": "system", "content": "你是一个专业的小说分析助手，只返回符合要求的 JSON，不输出任何其他内容。"},
         {"role": "user", "content": prompt},
     ], temperature=0.2, timeout=35, max_tokens=4096)
@@ -260,7 +262,10 @@ JSON 结构：
 
 
 def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = True, detail_level: str = "standard"):
-    """只生成章节摘要，~3-5 秒快速返回"""
+    """只生成章节摘要，~3-5 秒快速返回。
+
+    安全过滤策略：如果首次调用返回空内容，自动用更短文本重试一次。
+    """
     if not API_KEY:
         raise RuntimeError("缺少 DEEPSEEK_API_KEY")
 
@@ -269,23 +274,47 @@ def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = Tru
         "必须开启无剧透模式：只基于当前章节文本分析，不得引用后文剧情。"
         if spoiler_free else ""
     )
-    text = text[:8000] if len(text) > 8000 else text
 
-    prompt = f"""章节标题：{chapter_title}。{spoiler_rule}
+    def _try_summary(text_input: str, max_tok: int, temp: float = 0.2) -> tuple:
+        """单次摘要调用，返回 (summary_text, finish_reason, is_empty)"""
+        prompt = f"""章节标题：{chapter_title}。{spoiler_rule}
 {summary_rule}
 不要输出 JSON，直接返回纯文本摘要，不要任何格式标记和前缀。
-正文：{text}"""
+正文：{text_input}"""
+        payload, finish = _call_ai([
+            {"role": "system", "content": "你是一个专业的小说分析助手。只返回摘要纯文本，不输出 JSON，不加前缀或解释。"},
+            {"role": "user", "content": prompt},
+        ], temperature=temp, timeout=30, max_retries=2, max_tokens=max_tok)
+        raw = payload["choices"][0]["message"]["content"]
+        if not raw or not str(raw).strip():
+            return "", finish, True
+        summary = _strip_ai_chatter(raw).strip()
+        return summary, finish, False
 
-    payload = _call_ai([
-        {"role": "system", "content": "你是一个专业的小说分析助手。只返回摘要纯文本，不输出 JSON，不加前缀或解释。"},
-        {"role": "user", "content": prompt},
-    ], temperature=0.2, timeout=30, max_retries=2, max_tokens=2048)
+    text_input = text[:8000] if len(text) > 8000 else text
 
-    raw = payload["choices"][0]["message"]["content"]
-    if not raw or not str(raw).strip():
-        raise RuntimeError("AI 返回空内容，可能触发内容安全过滤，请稍后重试")
-    # 直接返回纯文本，不再走 JSON 解析
-    summary = _strip_ai_chatter(raw).strip()
+    # 第一次尝试：正常参数
+    summary, finish, is_empty = _try_summary(text_input, max_tok=4096)
+
+    if is_empty:
+        # 安全过滤触发 → 尝试更短文本（前 4000 字）+ 稍高温度绕过过滤
+        short_text = text_input[:4000]
+        if len(short_text) >= 500:
+            summary, finish, is_empty = _try_summary(short_text, max_tok=3072, temp=0.5)
+
+    if is_empty:
+        raise RuntimeError(
+            "AI 内容安全过滤触发（本章可能含敏感内容），"
+            "建议：1) 稍后重试 2) 切换为「简洁」模式再试 3) 跳过本章分析下一章"
+        )
+
+    # 检测截断：finish_reason 为 "length" 说明被 max_tokens 截断
+    if finish == "length" and len(summary) > 100:
+        # 末尾可能不完整，尝试找到最后一个完整句子
+        last_period = max(summary.rfind("。"), summary.rfind("！"), summary.rfind("？"), summary.rfind("."))
+        if last_period > len(summary) * 0.6:
+            summary = summary[:last_period + 1]
+
     return {"summary": summary}
 
 
@@ -298,7 +327,7 @@ def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = Tru
         "必须开启无剧透模式：只基于当前章节文本分析，不得引用后文剧情。"
         if spoiler_free else ""
     )
-    text = text[:8000] if len(text) > 8000 else text
+    text_input = text[:8000] if len(text) > 8000 else text
 
     prompt = f"""章节标题：{chapter_title}。{spoiler_rule}
 分析以下内容，严格按 JSON 返回（只输出 JSON，不要任何其他文字）：
@@ -307,12 +336,12 @@ def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = Tru
 - terms：0-3 个关键术语（term + meaning）
 - graph：人物关系 nodes（id=n1,n2...、label、level=core/normal）+ edges（from、to、label），至少要有 1 个 node
 JSON 格式：{{{{"characters":[{{{{"name":"","note":""}}}}],"foreshadowing":[{{{{"clue":"","reason":"","confidence":70}}}}],"terms":[{{{{"term":"","meaning":""}}}}],"graph":{{{{"nodes":[{{{{"id":"n1","label":"","level":"core"}}}}],"edges":[{{{{"from":"n1","to":"n2","label":""}}}}]}}}}}}}}
-正文：{text}"""
+正文：{text_input}"""
 
-    payload = _call_ai([
+    payload, _finish = _call_ai([
         {"role": "system", "content": "你是一个专业的小说分析助手，只返回 JSON，不输出任何其他内容。"},
         {"role": "user", "content": prompt},
-    ], temperature=0.2, timeout=30, max_retries=2, max_tokens=2048)
+    ], temperature=0.2, timeout=30, max_retries=2, max_tokens=3072)
 
     try:
         raw = payload["choices"][0]["message"]["content"]
@@ -490,7 +519,7 @@ def answer_from_memory(question: str, memories: list[dict], spoiler_free: bool =
 {json.dumps(compact_memories, ensure_ascii=False)}
 """
 
-    payload = _call_ai([
+    payload, _finish = _call_ai([
         {"role": "user", "content": prompt},
     ], temperature=0.2, timeout=60)
 
@@ -545,7 +574,7 @@ def review_recent_chapters(book_title: str, memories: list[dict]):
 5. **接下来阅读提示**：无剧透的阅读指引，帮读者留意可能重要的内容
 """
 
-    payload = _call_ai([
+    payload, _finish = _call_ai([
         {"role": "user", "content": prompt},
     ], temperature=0.3, timeout=60)
 
@@ -597,7 +626,7 @@ def check_foreshadowing_payoff(current_analysis: dict, saved_clues: list[dict]):
 - reader_message 要简短，不透露后文
 """
 
-    payload = _call_ai([
+    payload, _finish = _call_ai([
         {"role": "user", "content": prompt},
     ], temperature=0.2, timeout=60)
 
@@ -661,7 +690,7 @@ def suggest_questions(book_title: str, recent_analyses: list[dict]):
   {{"question": "问题文本", "reason": "为什么这个问题值得问（10字以内）"}}
 ]"""
 
-    payload = _call_ai([
+    payload, _finish = _call_ai([
         {"role": "user", "content": prompt},
     ], temperature=0.5, timeout=30)
 
@@ -766,7 +795,7 @@ def _generate_chunk_summary(book_title: str, chunk_text: str,
 
 请输出阶段性总结："""
 
-    payload = _call_ai([
+    payload, _finish = _call_ai([
         {"role": "user", "content": prompt},
     ], temperature=0.3, timeout=60)
     try:
@@ -828,7 +857,7 @@ def _call_report_api(book_title: str, content: str, total: int,
 ## 💡 阅读建议
 基于已读内容，给读者的后续阅读建议，不剧透。"""
 
-    payload = _call_ai([
+    payload, _finish = _call_ai([
         {"role": "system", "content": "你是一个专业的书评人和阅读复盘助手。"},
         {"role": "user", "content": prompt},
     ], temperature=0.4, timeout=120)
@@ -860,7 +889,7 @@ def _call_light_report_api(book_title: str, content: str, total: int,
 ## 👥 人物一览
 ## 🔍 伏笔线索"""
 
-    payload = _call_ai([
+    payload, _finish = _call_ai([
         {"role": "system", "content": "你是一个专业的阅读复盘助手。回答简洁有力，每条不超过两句话。"},
         {"role": "user", "content": prompt},
     ], temperature=0.3, timeout=60)
