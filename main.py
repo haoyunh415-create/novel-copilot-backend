@@ -1412,7 +1412,11 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
             old = conn.execute("SELECT result_json FROM analyses WHERE username=? AND text_hash=? AND detail_level=? AND spoiler_free=?", (user, content_hash, req.detail_level, spoiler_int)).fetchone()
             if old:
                 try:
-                    cached = json.loads(old["result_json"])
+                    parsed = json.loads(old["result_json"])
+                    # 跳过错误缓存：摘要以"AI 服务暂"开头的是失败结果，不应命中缓存
+                    s = (parsed.get("summary", "") if isinstance(parsed, dict) else "")
+                    if not s.startswith("AI 服务暂"):
+                        cached = parsed
                 except json.JSONDecodeError:
                     cached = None
         if cached:
@@ -1470,9 +1474,10 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
 
                 try:
                     with get_db() as db_conn:
-                        db_conn.execute("INSERT OR REPLACE INTO analyses (username, book_id, chapter_title, chapter_index, source_url, text_hash, detail_level, spoiler_free, result_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (user, book_id, req.chapter_title, req.chapter_index, req.source_url, content_hash, req.detail_level, spoiler_int, json.dumps(result, ensure_ascii=False), int(time.time())))
-                        if book_id: db_conn.execute("UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?", (book_id, book_id))
-                        if not ai_error: _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
+                        if not ai_error:
+                            db_conn.execute("INSERT OR REPLACE INTO analyses (username, book_id, chapter_title, chapter_index, source_url, text_hash, detail_level, spoiler_free, result_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (user, book_id, req.chapter_title, req.chapter_index, req.source_url, content_hash, req.detail_level, spoiler_int, json.dumps(result, ensure_ascii=False), int(time.time())))
+                            if book_id: db_conn.execute("UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?", (book_id, book_id))
+                            _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
                 except Exception:
                     import logging
                     logging.warning("analyze_progressive: failed to save analysis for user=%s", user[:16] if len(user) > 16 else user)
