@@ -2876,21 +2876,34 @@ th,td{padding:8px 10px;border:1px solid #e2d9d1;text-align:left}th{background:#e
 
 <script>
 const API = window.location.origin;
-let adminKey = localStorage.getItem("admin_key") || "admin_dev_key";
+let adminKey = localStorage.getItem("admin_key") || "";
 
-function setAdminKey() {
-  const key = prompt("管理员密钥:", localStorage.getItem("admin_key") || "admin_dev_key");
-  if (key) { adminKey = key; localStorage.setItem("admin_key", key); }
+function promptKey(msg) {
+  const key = prompt(msg || "请输入管理员密钥:", "");
+  if (key) { adminKey = key.trim(); localStorage.setItem("admin_key", adminKey); }
+  return !!adminKey;
 }
 
 async function fetchAPI(path, opts = {}) {
+  if (!adminKey) {
+    if (!promptKey("请输入管理员密钥以访问后台:")) throw new Error("需要管理员密钥");
+  }
   const sep = path.includes("?") ? "&" : "?";
   const res = await fetch(API + path + sep + "admin_key=" + encodeURIComponent(adminKey), {
     ...opts,
     headers: { ...opts.headers, "Content-Type": "application/json" }
   });
-  return res.json();
+  const data = await res.json();
+  if (!data.success && (res.status === 401 || res.status === 403)) {
+    localStorage.removeItem("admin_key");
+    adminKey = "";
+    if (promptKey("密钥错误，请重新输入:")) return fetchAPI(path, opts);
+  }
+  return data;
 }
+
+if (!adminKey) promptKey("请输入管理员密钥以访问后台:");
+
 
 function msg(text, isErr) {
   const el = document.getElementById("message");
