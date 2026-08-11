@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.6
+// @version      2.3.7
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -94,27 +94,27 @@
           data: (options && options.body) || undefined,
           timeout: 120000,
           onload: function(resp) {
-            var respHeaders = {};
-            var hdrText = resp.responseHeaders || "";
-            hdrText.split(/\r?\n/).forEach(function(line) {
-              var sep = line.indexOf(": ");
-              if (sep > 0) respHeaders[line.substring(0, sep).toLowerCase()] = line.substring(sep + 2);
-            });
-            var ct = respHeaders["content-type"] || "";
             var text = resp.responseText;
-            var body = typeof ReadableStream !== "undefined" ? new ReadableStream({
-              start: function(controller) {
-                controller.enqueue(new TextEncoder().encode(text));
-                controller.close();
-              }
-            }) : null;
+            var isSSE = text.indexOf("data: ") === 0;
+            var ct = isSSE ? "text/event-stream" : "";
+            var body = null;
+            if (typeof ReadableStream !== "undefined" && typeof TextEncoder !== "undefined") {
+              try {
+                body = new ReadableStream({
+                  start: function(controller) {
+                    controller.enqueue(new TextEncoder().encode(text));
+                    controller.close();
+                  }
+                });
+              } catch (_) {}
+            }
             resolve({
               ok: resp.status >= 200 && resp.status < 300,
               status: resp.status,
-              headers: { get: function(name) { return respHeaders[name.toLowerCase()] || null; } },
+              headers: { get: function(name) { return name === "content-type" ? ct : null; } },
               body: body,
               json: function() {
-                if (ct.indexOf("text/event-stream") !== -1) return Promise.reject(new Error("SSE response"));
+                if (isSSE) return Promise.reject(new Error("SSE response"));
                 return Promise.resolve(JSON.parse(text));
               },
               text: function() { return Promise.resolve(text); }
@@ -781,7 +781,35 @@
 
   // ═══════════ 流式响应消费 ═══════════
 
+  function dispatchSSEEvent(line, callbacks) {
+    if (line.indexOf("data: ") !== 0) return;
+    try {
+      var event = JSON.parse(line.substring(6));
+      if (event.type === "progress") {
+        if (callbacks.onProgress) callbacks.onProgress(event.stage, event.elapsed_s || 0);
+      } else if (event.type === "summary") {
+        if (callbacks.onSummary) callbacks.onSummary(event.data);
+      } else if (event.type === "done") {
+        callbacks.onDone(event.data);
+      } else if (event.type === "error") {
+        callbacks.onError(event.message);
+      }
+    } catch (_) {}
+  }
+
+  function processSSELines(text, callbacks) {
+    var lines = text.split("\n");
+    for (var i = 0; i < lines.length; i++) {
+      dispatchSSEEvent(lines[i], callbacks);
+    }
+  }
+
   async function consumeSSE(response, callbacks) {
+    if (!response.body || !response.body.getReader) {
+      var fullText = await response.text();
+      processSSELines(fullText, callbacks);
+      return;
+    }
     var reader = response.body.getReader();
     var decoder = new TextDecoder();
     var buffer = "";
@@ -793,20 +821,7 @@
         var lines = buffer.split("\n");
         buffer = lines.pop();
         for (var i = 0; i < lines.length; i++) {
-          var line = lines[i];
-          if (line.indexOf("data: ") !== 0) continue;
-          try {
-            var event = JSON.parse(line.substring(6));
-            if (event.type === "progress") {
-              if (callbacks.onProgress) callbacks.onProgress(event.stage, event.elapsed_s || 0);
-            } else if (event.type === "summary") {
-              if (callbacks.onSummary) callbacks.onSummary(event.data);
-            } else if (event.type === "done") {
-              callbacks.onDone(event.data);
-            } else if (event.type === "error") {
-              callbacks.onError(event.message);
-            }
-          } catch (_) {}
+          dispatchSSEEvent(lines[i], callbacks);
         }
       }
     } catch (e) {
