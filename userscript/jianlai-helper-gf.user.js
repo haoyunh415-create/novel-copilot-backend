@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.5
+// @version      2.3.6
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -103,12 +103,34 @@
           data: (options && options.body) || undefined,
           timeout: 120000,
           onload: function(resp) {
+            // 解析响应头
+            var respHeaders = {};
+            var hdrText = resp.responseHeaders || "";
+            hdrText.split(/\r?\n/).forEach(function(line) {
+              var sep = line.indexOf(": ");
+              if (sep > 0) respHeaders[line.substring(0, sep).toLowerCase()] = line.substring(sep + 2);
+            });
+            var ct = respHeaders["content-type"] || "";
+            var text = resp.responseText;
+
+            // 构建 body ReadableStream（兼容 consumeSSE 的 getReader() 调用）
+            var body = typeof ReadableStream !== "undefined" ? new ReadableStream({
+              start: function(controller) {
+                controller.enqueue(new TextEncoder().encode(text));
+                controller.close();
+              }
+            }) : null;
+
             resolve({
               ok: resp.status >= 200 && resp.status < 300,
               status: resp.status,
-              headers: { get: function(name) { return null; } },
-              json: function() { return Promise.resolve(JSON.parse(resp.responseText)); },
-              text: function() { return Promise.resolve(resp.responseText); }
+              headers: { get: function(name) { return respHeaders[name.toLowerCase()] || null; } },
+              body: body,
+              json: function() {
+                if (ct.indexOf("text/event-stream") !== -1) return Promise.reject(new Error("SSE response"));
+                return Promise.resolve(JSON.parse(text));
+              },
+              text: function() { return Promise.resolve(text); }
             });
           },
           onerror: function() { reject(new Error("网络请求失败，请检查网络连接")); },
