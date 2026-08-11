@@ -16,6 +16,7 @@
 // @match        *://*.fannovel.com/*
 // @match        *://*.fanqienovel.com/*
 // @match        *://*.69shu.com/*
+// @match        *://*.biquga.com/*
 // @match        *://*.biquge.com/*
 // @match        *://*.xbiquge.com/*
 // @match        *://*.bxwxorg.com/*
