@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.4
+// @version      2.3.5
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -37,6 +37,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
+// @grant        GM_xmlhttpRequest
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -86,6 +87,37 @@
       } catch (_) {}
     }
   };
+
+  // ═══════════ CSP 绕过层 ═══════════
+  // 部分网站（如番茄小说）的 CSP 限制 connect-src，阻止 fetch 到 jianla.xyz
+  // GM_xmlhttpRequest 在油猴特权上下文运行，不受页面 CSP 限制
+  var _nativeFetch = window.fetch;
+  function safeFetch(url, options) {
+    if (url.indexOf("jianla.xyz") !== -1 && typeof GM_xmlhttpRequest === "function") {
+      return new Promise(function(resolve, reject) {
+        var headers = (options && options.headers) || {};
+        GM_xmlhttpRequest({
+          url: url,
+          method: (options && options.method) || "GET",
+          headers: headers,
+          data: (options && options.body) || undefined,
+          timeout: 120000,
+          onload: function(resp) {
+            resolve({
+              ok: resp.status >= 200 && resp.status < 300,
+              status: resp.status,
+              headers: { get: function(name) { return null; } },
+              json: function() { return Promise.resolve(JSON.parse(resp.responseText)); },
+              text: function() { return Promise.resolve(resp.responseText); }
+            });
+          },
+          onerror: function() { reject(new Error("网络请求失败，请检查网络连接")); },
+          ontimeout: function() { reject(new Error("请求超时，请稍后重试")); }
+        });
+      });
+    }
+    return _nativeFetch(url, options);
+  }
 
   const MIN_INTERVAL_MS = 5000;
   let lastCallTime = 0;
@@ -337,7 +369,7 @@
     _refreshPromise = (async () => {
       try {
         var api = await getAPI();
-        var resp = await fetch(api + "/api/auth/refresh", {
+        var resp = await safeFetch(api + "/api/auth/refresh", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ refresh_token: refreshToken })
@@ -386,7 +418,7 @@
     var lastError;
     for (var i = 0; i <= retries; i++) {
       try {
-        var resp = await fetch(url, options);
+        var resp = await safeFetch(url, options);
         if (resp.ok || i === retries) return resp;
         if (resp.status >= 500) { lastError = new Error("服务器错误(" + resp.status + ")，正在重试..."); }
         else return resp;
@@ -778,7 +810,7 @@
   }
 
   async function streamFetch(url, options, callbacks) {
-    var response = await fetch(url, options);
+    var response = await safeFetch(url, options);
     var ct = response.headers.get("content-type") || "";
 
     if (!response.ok) {
@@ -1254,7 +1286,7 @@
           row.innerHTML = '<span style="font-size:12px;color:#2e7d32">✅ 感谢反馈！</span>';
         }
 
-        fetch(API + "/api/feedback", {
+        safeFetch(API + "/api/feedback", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1279,7 +1311,7 @@
 
     var API = await getAPI();
     try {
-      var res = await fetch(API + "/api/foreshadowing/check?book_id=" + bookId, {
+      var res = await safeFetch(API + "/api/foreshadowing/check?book_id=" + bookId, {
         method: "POST", headers: { Authorization: "Bearer " + token }
       });
       var payload = await res.json();
@@ -1612,7 +1644,7 @@
       return;
     }
     try {
-      const resp = await fetch(API + "/api/books/" + _currentBookId + "/foreshadowing", {
+      const resp = await safeFetch(API + "/api/books/" + _currentBookId + "/foreshadowing", {
         headers: { Authorization: "Bearer " + token }
       });
       const data = await resp.json();
@@ -1677,7 +1709,7 @@
     if (!token) return;
 
     try {
-      var resp = await fetch(API + "/api/books/" + _currentBookId + "/analyses", {
+      var resp = await safeFetch(API + "/api/books/" + _currentBookId + "/analyses", {
         headers: { Authorization: "Bearer " + token }
       });
       var payload = await resp.json();
@@ -1843,7 +1875,7 @@
     var token = await getToken();
     if (!token) { alert("请先登录"); return; }
     try {
-      var resp = await fetch(API + "/api/analyses/" + analysisId, {
+      var resp = await safeFetch(API + "/api/analyses/" + analysisId, {
         method: "DELETE",
         headers: { Authorization: "Bearer " + token }
       });
@@ -1925,7 +1957,7 @@
     }
 
     try {
-      var resp = await fetch(API + "/api/books/" + _currentBookId + "/characters", {
+      var resp = await safeFetch(API + "/api/books/" + _currentBookId + "/characters", {
         headers: { Authorization: "Bearer " + token }
       });
       var payload = await resp.json();
@@ -2310,7 +2342,7 @@
 
     try {
       var API = await getAPI();
-      var resp = await fetch(API + "/api/me", { headers: { Authorization: "Bearer " + token } });
+      var resp = await safeFetch(API + "/api/me", { headers: { Authorization: "Bearer " + token } });
       if (resp.status === 401) {
         clearAuth();
         authBox.style.display = "block";
@@ -2366,7 +2398,7 @@
 
     try {
       var API = await getAPI();
-      var resp = await fetch(API + "/api/auth/send-code", {
+      var resp = await safeFetch(API + "/api/auth/send-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email })
@@ -2414,7 +2446,7 @@
 
     try {
       var API = await getAPI();
-      var resp = await fetch(API + "/api/auth/verify-code", {
+      var resp = await safeFetch(API + "/api/auth/verify-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email, code: code })
@@ -2449,7 +2481,7 @@
     if (token && refreshToken) {
       try {
         var API = await getAPI();
-        fetch(API + "/api/auth/logout", {
+        safeFetch(API + "/api/auth/logout", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
