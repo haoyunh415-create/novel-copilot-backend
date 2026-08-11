@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.3
+// @version      2.3.4
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -87,8 +87,8 @@
   let lastCallTime = 0;
   let isRunning = false;
   let network = null;
-  let _currentBookId = null;
-  let _currentBookTitle = null;
+  let _currentBookId = (function () { try { var v = store.get("currentBookId"); return v ? parseInt(v, 10) : null; } catch (_) { return null; } })();
+  let _currentBookTitle = (function () { try { return store.get("currentBookTitle") || null; } catch (_) { return null; } })();
   let _graphMode = "chapter";  // "chapter" | "book"
   let _historySortMode = (function () { try { return localStorage.getItem("JL_HistSort") || "time"; } catch (_) { return "time"; } })();
   let _lastFailedQuestion = null;
@@ -1146,6 +1146,7 @@
             var prevBookId = _currentBookId;
             _currentBookId = data.book_id;
             _currentBookTitle = bookTitle || chapterTitle || "当前书籍";
+            try { store.set("currentBookId", String(_currentBookId)); store.set("currentBookTitle", _currentBookTitle); } catch (_) {}
             var tag = document.getElementById("jl-book-tag");
             if (tag) tag.textContent = "当前：" + _currentBookTitle;
             updateQABookTag();
