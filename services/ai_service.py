@@ -335,7 +335,7 @@ def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = Tru
 - foreshadowing：0-3 条伏笔线索。如果章节有值得关注的细节、反常事件、暗示未来发展的内容，请标注（clue + reason 15字以内 + confidence 0-100）。尽量不要返回空数组
 - terms：0-3 个关键术语（term + meaning）
 - graph：人物关系 nodes（id=n1,n2...、label、level=core/normal）+ edges（from、to、label），至少要有 1 个 node
-JSON 格式：{{{{"characters":[{{{{"name":"","note":""}}}}],"foreshadowing":[{{{{"clue":"","reason":"","confidence":70}}}}],"terms":[{{{{"term":"","meaning":""}}}}],"graph":{{{{"nodes":[{{{{"id":"n1","label":"","level":"core"}}}}],"edges":[{{{{"from":"n1","to":"n2","label":""}}}}]}}}}}}}}
+JSON 格式：{{"characters":[{{"name":"","note":""}}],"foreshadowing":[{{"clue":"","reason":"","confidence":70}}],"terms":[{{"term":"","meaning":""}}],"graph":{{"nodes":[{{"id":"n1","label":"","level":"core"}}],"edges":[{{"from":"n1","to":"n2","label":""}}]}}}}
 正文：{text_input}"""
 
     payload, _finish = _call_ai([
@@ -390,7 +390,7 @@ def analyze_text_stream(text: str, chapter_title: str, detail_level: str = "stan
 6. graph.edges：人物关系边 from、to、label
 
 JSON 结构：
-{{{{"summary":"...","characters":[{{{{"name":"","note":""}}}}],"foreshadowing":[{{{{"clue":"","reason":"","confidence":70}}}}],"terms":[{{{{"term":"","meaning":""}}}}],"graph":{{{{"nodes":[{{{{"id":"n1","label":"","level":"core"}}}}],"edges":[{{{{"from":"n1","to":"n2","label":""}}}}]}}}}}}}}
+{{"summary":"...","characters":[{{"name":"","note":""}}],"foreshadowing":[{{"clue":"","reason":"","confidence":70}}],"terms":[{{"term":"","meaning":""}}],"graph":{{"nodes":[{{"id":"n1","label":"","level":"core"}}],"edges":[{{"from":"n1","to":"n2","label":""}}]}}}}
 
 正文：
 {text}"""
