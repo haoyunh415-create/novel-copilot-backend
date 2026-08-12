@@ -1,4 +1,4 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
 // @version      2.3.11
@@ -508,6 +508,7 @@
           '<div class="jl-card"><h3>本章概况</h3><p id="jl-summary">点击下方按钮开始分析。</p></div>' +
           '<div class="jl-card"><h3>关键人物</h3><div id="jl-characters"><p class="jl-empty">暂无</p></div></div>' +
           '<div class="jl-card"><h3>名词解释</h3><div id="jl-terms"><p class="jl-empty">暂无</p></div></div>' +
+          '<div class="jl-card" id="jl-payoff-card" style="display:none"><h3>🏮 伏笔回收</h3><div id="jl-payoff"></div></div>' +
         '</section>' +
         '<section id="jl-panel-clues" class="jl-panel">' +
           '<div class="jl-card"><h3>疑似伏笔</h3><div id="jl-clues"><p class="jl-empty">暂无</p></div></div>' +
@@ -856,6 +857,10 @@
     setText("#jl-heading", chapterTitle);
     setText("#jl-summary", "🤖 AI 正在分析…（" + getModeLabel() + "）");
 
+    // 重置伏笔回收卡片
+    var payoffCardGuest = document.getElementById("jl-payoff-card");
+    if (payoffCardGuest) payoffCardGuest.style.display = "none";
+
     try {
       var _summaryFirst = false;
       var _newCount = 0;
@@ -1107,6 +1112,10 @@
       setText("#jl-heading", chapterTitle);
       setText("#jl-summary", "🤖 AI 正在分析…（" + getModeLabel() + "）");
 
+      // 重置伏笔回收卡片
+      var payoffCard = document.getElementById("jl-payoff-card");
+      if (payoffCard) payoffCard.style.display = "none";
+
       const bookTitle = getBookTitle();
       const author = getAuthor();
       const chapterIndex = getChapterIndex();
@@ -1283,30 +1292,24 @@
       var matches = payload.data.matches || [];
       if (matches.length === 0) return;
 
-      // 在概况面板顶部显示伏笔回收通知
-      var panel = document.getElementById("jl-panel-summary");
-      var banner = document.createElement("div");
-      banner.className = "jl-card";
-      banner.style.cssText = "border-left:3px solid #ff8f00;background:linear-gradient(135deg, #fff8e1 0%, #fff3cd 100%)";
-      banner.innerHTML =
-        '<h3 style="color:#e65100;font-size:15px">🏮 伏笔回收提醒</h3>' +
-        '<p style="font-size:12px;color:#9e7d27;margin-bottom:8px">本章可能回收了以下历史伏笔：</p>' +
-        matches.map(function (m) {
-          return '<div class="jl-list-item" style="border-color:#ffe082;background:#fffef5">' +
-            '<span style="color:#bf360c;font-weight:600;font-size:14px">✨ ' + (m.clue || m.reader_message || "未知线索") + '</span>' +
-            (m.note || m.reader_message ? '<br><small style="color:#8d6e63">' + (m.note || m.reader_message) + '</small>' : '') +
-            (m.chapter_title ? '<br><small style="color:#a1887f">📖 来自：' + m.chapter_title + '</small>' : '') +
-            (m.match_type && m.match_type !== 'possible' ? '<br><small style="color:#e65100;font-weight:500">🔥 ' + ({echo:'线索重现', progress:'线索推进', payoff:'伏笔回收'}[m.match_type] || m.match_type) + '</small>' : '') +
-          '</div>';
-        }).join("");
+      // 在概况面板底部（名词解释后面）显示伏笔回收卡片
+      var card = document.getElementById("jl-payoff-card");
+      var container = document.getElementById("jl-payoff");
+      if (!card || !container) return;
 
-      // 插入到面板最前面
-      var firstCard = panel.querySelector(".jl-card");
-      if (firstCard) {
-        panel.insertBefore(banner, firstCard);
-      } else {
-        panel.appendChild(banner);
-      }
+      card.style.display = "";
+      clearNode(container);
+
+      matches.forEach(function (m) {
+        var div = document.createElement("div");
+        div.className = "jl-list-item";
+        div.innerHTML =
+          '<span style="font-weight:600">✨ ' + escHtml(m.clue || m.reader_message || "未知线索") + '</span>' +
+          (m.note || m.reader_message ? '<br><small style="color:#8d6e63">' + escHtml(m.note || m.reader_message) + '</small>' : '') +
+          (m.chapter_title ? '<br><small style="color:#a1887f">📖 来自：' + escHtml(m.chapter_title) + '</small>' : '') +
+          (m.match_type && m.match_type !== 'possible' ? '<br><small style="color:#e65100;font-weight:500">🔥 ' + ({echo:'线索重现', progress:'线索推进', payoff:'伏笔回收'}[m.match_type] || m.match_type) + '</small>' : '');
+        container.appendChild(div);
+      });
     } catch (_) {
       // 静默失败，不打断用户
     }
