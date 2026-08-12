@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.8
+// @version      2.3.10
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -48,12 +48,36 @@
   window.__jianlai_userscript_loaded__ = true;
 
   // 动态加载 vis-network（Greasy Fork 合规：不自带 @require CDN 外部脚本）
-  if (!window.vis && !document.getElementById("jl-vis-loader")) {
+  // CSP 兜底：部分小说网站阻止外部脚本加载，此时用 GM_xmlhttpRequest 内联注入
+  function _loadVisNetwork() {
+    var VIS_URL = "https://jianla.xyz/static/vis-network.min.js";
     var s = document.createElement("script");
     s.id = "jl-vis-loader";
-    s.src = "https://jianla.xyz/static/vis-network.min.js";
-    s.onerror = function(){};
+    s.src = VIS_URL;
+    s.onload = function() { window.__jl_vis_ready__ = true; };
+    s.onerror = function() {
+      // CSP 阻止外部脚本 → 用 GM_xmlhttpRequest 绕过 CSP 拉取后内联注入
+      if (typeof GM_xmlhttpRequest === "function") {
+        GM_xmlhttpRequest({
+          url: VIS_URL,
+          method: "GET",
+          onload: function(resp) {
+            if (resp.responseText && resp.responseText.length > 1000) {
+              var inline = document.createElement("script");
+              inline.id = "jl-vis-loader-inline";
+              inline.textContent = resp.responseText;
+              document.head.appendChild(inline);
+              window.__jl_vis_ready__ = true;
+            }
+          },
+          onerror: function() {}
+        });
+      }
+    };
     document.head.appendChild(s);
+  }
+  if (!window.vis && !document.getElementById("jl-vis-loader")) {
+    _loadVisNetwork();
   }
 
   // ═══════════ 环境适配层 ═══════════
@@ -1363,15 +1387,16 @@
       var panel = document.getElementById("jl-panel-summary");
       var banner = document.createElement("div");
       banner.className = "jl-card";
-      banner.style.cssText = "border-left:3px solid #2e7d32;background:#e8f5e9";
+      banner.style.cssText = "border-left:3px solid #ff8f00;background:linear-gradient(135deg, #fff8e1 0%, #fff3cd 100%)";
       banner.innerHTML =
-        '<h3 style="color:#2e7d32">🔔 伏笔回收提醒</h3>' +
-        '<p style="font-size:12px;color:#4a7c59;margin-bottom:6px">本章可能回收了以下历史伏笔：</p>' +
+        '<h3 style="color:#e65100;font-size:15px">🏮 伏笔回收提醒</h3>' +
+        '<p style="font-size:12px;color:#9e7d27;margin-bottom:8px">本章可能回收了以下历史伏笔：</p>' +
         matches.map(function (m) {
-          return '<div class="jl-list-item" style="border-color:#c8e6c9">' +
-            '<span style="color:#2e7d32;font-weight:600">💡 ' + (m.clue || "未知线索") + '</span>' +
-            (m.note ? '<br><small style="color:#6f8f7c">' + m.note + '</small>' : '') +
-            (m.chapter_title ? '<br><small style="color:#8b7c72">来自：' + m.chapter_title + '</small>' : '') +
+          return '<div class="jl-list-item" style="border-color:#ffe082;background:#fffef5">' +
+            '<span style="color:#bf360c;font-weight:600;font-size:14px">✨ ' + (m.clue || m.reader_message || "未知线索") + '</span>' +
+            (m.note || m.reader_message ? '<br><small style="color:#8d6e63">' + (m.note || m.reader_message) + '</small>' : '') +
+            (m.chapter_title ? '<br><small style="color:#a1887f">📖 来自：' + m.chapter_title + '</small>' : '') +
+            (m.match_type && m.match_type !== 'possible' ? '<br><small style="color:#e65100;font-weight:500">🔥 ' + ({echo:'线索重现', progress:'线索推进', payoff:'伏笔回收'}[m.match_type] || m.match_type) + '</small>' : '') +
           '</div>';
         }).join("");
 
