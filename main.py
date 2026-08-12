@@ -2354,6 +2354,19 @@ def check_foreshadowing(book_id: int, chapter_text: str = None, user=Depends(get
     except Exception as exc:
         return fail(friendly_error(exc))
 
+    # 用 saved_clue_id 回查历史伏笔，补充客户端需要的字段
+    clue_map = {c["id"]: c for c in saved_clues}
+    for match in matches:
+        saved = clue_map.get(match.get("saved_clue_id", ""), {})
+        if not match.get("clue"):
+            match["clue"] = saved.get("clue", "")
+        if not match.get("chapter_title"):
+            match["chapter_title"] = saved.get("chapter_title", "")
+        if not match.get("note"):
+            match["note"] = match.get("reader_message", "")
+        if not match.get("reason"):
+            match["reason"] = saved.get("reason", "")
+
     return ok({"book_title": book["title"], "current_chapter": latest["chapter_title"], "matches": matches})
 
 

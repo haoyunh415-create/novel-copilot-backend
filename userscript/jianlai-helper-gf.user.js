@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.10
-// @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
+// @version      2.3.11
+// @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 15+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
 // @supportURL   https://novel-copilot-backend.pages.dev/support.html
@@ -12,29 +12,16 @@
 // @match        *://*.17k.com/*
 // @match        *://*.jjwxc.net/*
 // @match        *://*.qimao.com/*
-// @match        *://*.fannovel.com/*
 // @match        *://*.fanqienovel.com/*
-// @match        *://*.69shu.com/*
 // @match        *://*.biquga.com/*
-// @match        *://*.biquge.com/*
 // @match        *://*.xbiquge.com/*
-// @match        *://*.bxwxorg.com/*
-// @match        *://*.bxwx.com/*
-// @match        *://*.uukanshu.com/*
 // @match        *://*.hetushu.com/*
-// @match        *://*.booktxt.net/*
 // @match        *://*.soxs.cc/*
 // @match        *://*.trxs.cc/*
-// @match        *://*.69shuba.com/*
-// @match        *://*.ibiquge.net/*
-// @match        *://*.biqubu.com/*
-// @match        *://*.biququ.com/*
-// @match        *://*.biquwo.com/*
-// @match        *://*.shubao.com/*
-// @match        *://*.piaotia.com/*
 // @match        *://*.ptwxz.com/*
-// @match        *://*.biqugex.com/*
-// @match        *://*.bxwx.io/*
+// @match        *://*.bqgoo.cc/*
+// @match        *://*.pinggoua.com/*
+// @match        *://*.yckceo.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
