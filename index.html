@@ -246,6 +246,26 @@ nav .container{display:flex;align-items:center;justify-content:space-between}
 }
 .pp-footer{margin-top:8px;font-size:.63rem;color:var(--sage)}
 
+/* ═══════ Screenshots ═══════ */
+.screenshots{padding:80px 0 60px}
+.screenshots .section-label,.screenshots .section-title{text-align:center}
+.shot-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:22px;margin-top:8px}
+.shot-card{
+  margin:0;background:var(--card);border-radius:14px;overflow:hidden;
+  border:1px solid rgba(139,115,85,.14);box-shadow:var(--shadow-md);
+  transition:transform .35s ease,box-shadow .35s ease;
+}
+.shot-card:hover{transform:translateY(-4px);box-shadow:var(--shadow-lg)}
+.shot-card img{display:block;width:100%;height:auto;border-bottom:1px solid rgba(139,115,85,.09);background:var(--parchment)}
+.shot-card figcaption{
+  display:flex;align-items:center;gap:9px;
+  padding:14px 18px;font-size:.9rem;font-weight:600;color:var(--brown-dark);
+}
+.shot-card figcaption .shot-tag{
+  font-size:.68rem;font-weight:600;color:var(--vermillion);
+  background:rgba(199,91,57,.08);padding:2px 9px;border-radius:10px;
+}
+
 /* ═══════ Steps ═══════ */
 .steps{background:var(--cream);padding:70px 0}
 .steps-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:44px}
@@ -303,6 +323,7 @@ footer a:hover{color:var(--vermillion)}
 @media(max-width:768px){
   .feature-grid{grid-template-columns:repeat(2,1fr)}
   .steps-grid{grid-template-columns:1fr}
+  .shot-grid{grid-template-columns:1fr}
   .step-arrow{display:none}
   .plugin-popup{position:relative;top:auto;right:auto;width:100%;border-radius:0}
   .novel-page{width:100%}
@@ -442,6 +463,32 @@ footer a:hover{color:var(--vermillion)}
           <div class="pp-footer">✅ 基于已读记忆 · 无剧透</div>
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════ Screenshots ═══════ -->
+<section class="screenshots" id="screenshots">
+  <div class="container">
+    <p class="section-label reveal">真实界面</p>
+    <h2 class="section-title reveal d1">真实产品截图</h2>
+    <div class="shot-grid">
+      <figure class="shot-card reveal d1">
+        <img src="/static/screenshots/shot-1.jpg" alt="鉴来助手标准概况（章节摘要）" loading="lazy" width="1100" height="692">
+        <figcaption>📝 标准概况<span class="shot-tag">章节摘要</span></figcaption>
+      </figure>
+      <figure class="shot-card reveal d2">
+        <img src="/static/screenshots/shot-2.jpg" alt="鉴来助手伏笔总览（伏笔雷达）" loading="lazy" width="1100" height="701">
+        <figcaption>🕵️ 伏笔总览<span class="shot-tag">伏笔雷达</span></figcaption>
+      </figure>
+      <figure class="shot-card reveal d3">
+        <img src="/static/screenshots/shot-3.jpg" alt="鉴来助手阅读周报" loading="lazy" width="1100" height="677">
+        <figcaption>📊 阅读周报<span class="shot-tag">进度概览</span></figcaption>
+      </figure>
+      <figure class="shot-card reveal d4">
+        <img src="/static/screenshots/shot-4.jpg" alt="鉴来助手人物关系图" loading="lazy" width="1100" height="698">
+        <figcaption>👥 人物关系图<span class="shot-tag">角色网络</span></figcaption>
+      </figure>
     </div>
   </div>
 </section>
