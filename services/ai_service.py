@@ -3,6 +3,8 @@ import os
 import re
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -10,6 +12,18 @@ load_dotenv()
 # 使用 Session 并禁用系统代理（Windows 上 requests 会从注册表读取代理配置）
 _session = requests.Session()
 _session.trust_env = False
+# CDN 会关闭空闲 keep-alive 连接，urllib3 复用半开连接会报 ConnectionError
+# （表现为间歇性"无法连接 AI 服务"）。挂带重试的适配器，连接失败时自动重建重试。
+_retry = Retry(
+    total=2,
+    connect=2,
+    read=1,
+    backoff_factor=0.3,
+    allowed_methods=frozenset(["POST"]),
+)
+_adapter = HTTPAdapter(max_retries=_retry, pool_connections=10, pool_maxsize=10)
+_session.mount("https://", _adapter)
+_session.mount("http://", _adapter)
 
 API_KEY = os.getenv("DEEPSEEK_API_KEY")
 API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
@@ -131,7 +145,7 @@ def _call_ai(messages: list[dict], temperature: float = 0.2, timeout: int = 35, 
                     "Content-Type": "application/json",
                 },
                 json=body,
-                timeout=timeout,
+                timeout=(10, timeout),  # connect 固定 10s（快速发现失效连接），read 用传入值
             )
             response.raise_for_status()
             payload = response.json()
