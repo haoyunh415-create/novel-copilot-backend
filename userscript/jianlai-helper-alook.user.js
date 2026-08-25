@@ -102,13 +102,15 @@
   function getChapterTitle() {
     // SPA 优先：document.title 在导航后准确更新（如"第2章 劫修 - 起点"）
     var dt = document.title.trim();
-    var m = dt.match(/第[0-9零一二三四五六七八九百千]+[章节回]\s*\S+/);
-    if (m) return m[0].replace(/\s+/g, "").substring(0, 80);
+    var m = dt.match(/第[0-9零一二三四五六七八九十百千]+[章节回]\s*.*?(?=在线免费阅读|免费阅读|在线阅读|最新章节|_|-|—|$)/);
+    if (m && m[0].trim().length >= 2) return m[0].trim().substring(0, 80);
     // 特定选择器
     var specificSelectors = [
+      ".muye-reader-title",
       ".j_chapterName", ".chapter-name", ".chaptername",
-      ".title", ".chapter-title", ".chapterTitle",
+      ".chapter-title", ".chapterTitle",
       ".article-title", ".post-title", ".entry-title",
+      ".title",
     ];
     for (var si = 0; si < specificSelectors.length; si++) {
       var el = document.querySelector(specificSelectors[si]);
@@ -117,7 +119,7 @@
     }
     // 移动端滚动：找视口内最近的章节标题（用户正在读的章节，而非页面第一个）
     var headings = document.querySelectorAll("h1, h2");
-    var chapterPattern = /第[0-9零一二三四五六七八九百千]+[章节回]/;
+    var chapterPattern = /第[0-9零一二三四五六七八九十百千]+[章节回]/;
     var bestEl = null, bestDist = Infinity;
     for (var i = 0; i < headings.length; i++) {
       var h = headings[i];
@@ -144,6 +146,7 @@
   // 查找章节标题所在 DOM 元素（用于锚定内容范围）
   function findChapterTitleElement() {
     const titleSelectors = [
+      ".muye-reader-title",
       ".j_chapterName", ".chapter-name", ".chaptername",
       "h1", "h2", ".title", ".chapter-title", ".chapterTitle",
       "[class*='chapter'] h1", "[class*='chapter'] h2",
@@ -162,7 +165,7 @@
   // 按章节边界提取正文（解决移动端一页多章拼接问题）
   function extractByChapterBoundary() {
     var headings = document.querySelectorAll("h1, h2");
-    var chapterPattern = /第[0-9零一二三四五六七八九百千]+[章节回]/;
+    var chapterPattern = /第[0-9零一二三四五六七八九十百千]+[章节回]/;
     // 找视口内最近的章节标题（用户正在读的章节）
     var startEl = null, bestDist = Infinity;
     for (var i = 0; i < headings.length; i++) {

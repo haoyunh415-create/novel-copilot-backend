@@ -17,10 +17,12 @@
 
   function getChapterTitle() {
     const selectors = [
+      ".muye-reader-title",
       ".j_chapterName", ".chapter-name", ".chaptername",
-      "h1", "h2", ".title", ".chapter-title", ".chapterTitle",
+      ".chapter-title", ".chapterTitle",
       "[class*='chapter'] h1", "[class*='chapter'] h2",
       ".article-title", ".post-title", ".entry-title",
+      "h1", "h2", ".title",
     ];
     for (const sel of selectors) {
       const el = document.querySelector(sel);
