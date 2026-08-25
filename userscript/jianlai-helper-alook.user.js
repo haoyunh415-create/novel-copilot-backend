@@ -747,6 +747,23 @@
     var reader = response.body.getReader();
     var decoder = new TextDecoder();
     var buffer = "";
+
+    function handleLine(line) {
+      if (line.indexOf("data: ") !== 0) return;
+      try {
+        var event = JSON.parse(line.substring(6));
+        if (event.type === "progress") {
+          if (callbacks.onProgress) callbacks.onProgress(event.stage, event.elapsed_s || 0);
+        } else if (event.type === "summary") {
+          if (callbacks.onSummary) callbacks.onSummary(event.data);
+        } else if (event.type === "done") {
+          callbacks.onDone(event.data);
+        } else if (event.type === "error") {
+          callbacks.onError(event.message);
+        }
+      } catch (_) {}
+    }
+
     try {
       while (true) {
         var chunk = await reader.read();
@@ -754,23 +771,12 @@
         buffer += decoder.decode(chunk.value, { stream: true });
         var lines = buffer.split("\n");
         buffer = lines.pop();
-        for (var i = 0; i < lines.length; i++) {
-          var line = lines[i];
-          if (line.indexOf("data: ") !== 0) continue;
-          try {
-            var event = JSON.parse(line.substring(6));
-            if (event.type === "progress") {
-              if (callbacks.onProgress) callbacks.onProgress(event.stage, event.elapsed_s || 0);
-            } else if (event.type === "summary") {
-              if (callbacks.onSummary) callbacks.onSummary(event.data);
-            } else if (event.type === "done") {
-              callbacks.onDone(event.data);
-            } else if (event.type === "error") {
-              callbacks.onError(event.message);
-            }
-          } catch (_) {}
-        }
+        for (var i = 0; i < lines.length; i++) handleLine(lines[i]);
       }
+      // 流结束：flush 解码器残留字节，处理 buffer 尾部（避免 done 丢失）
+      buffer += decoder.decode();
+      var tail = buffer.split("\n");
+      for (var j = 0; j < tail.length; j++) handleLine(tail[j]);
     } catch (e) {
       callbacks.onError("网络连接中断，请刷新页面后重试。联系客服 QQ：2313370765");
     }
@@ -859,6 +865,12 @@
     var chapterTitle = getChapterTitle();
     setText("#jl-heading", chapterTitle);
     setText("#jl-summary", "🤖 AI 正在分析…（" + getModeLabel() + "）");
+
+    // 清空上一章详情，避免分析过程中残留旧内容
+    ["#jl-characters", "#jl-terms", "#jl-clues"].forEach(function (sel) {
+      var box = document.querySelector(sel);
+      if (box) box.innerHTML = '<p class="jl-empty">分析中…</p>';
+    });
 
     // 重置伏笔回收卡片
     var payoffCardGuest = document.getElementById("jl-payoff-card");
@@ -1114,6 +1126,12 @@
       const chapterTitle = getChapterTitle();
       setText("#jl-heading", chapterTitle);
       setText("#jl-summary", "🤖 AI 正在分析…（" + getModeLabel() + "）");
+
+      // 清空上一章详情，避免分析过程中残留旧内容
+      ["#jl-characters", "#jl-terms", "#jl-clues"].forEach(function (sel) {
+        var box = document.querySelector(sel);
+        if (box) box.innerHTML = '<p class="jl-empty">分析中…</p>';
+      });
 
       // 重置伏笔回收卡片
       var payoffCard = document.getElementById("jl-payoff-card");
