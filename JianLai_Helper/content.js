@@ -1725,9 +1725,10 @@
   async function loadAnalysisHistory() {
     if (!_currentBookId) return;
 
-    // 避免重复加载
+    // 移除旧的历史面板，确保每次重新加载最新数据（否则翻页分析新章节后历史不刷新）
     var panel = document.getElementById("jl-panel-summary");
-    if (document.getElementById("jl-history-section")) return;
+    var oldSection = document.getElementById("jl-history-section");
+    if (oldSection) oldSection.remove();
 
     var API = await getAPI();
     var token = await getToken();

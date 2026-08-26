@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.12
+// @version      2.3.13
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -1834,9 +1834,10 @@
   async function loadAnalysisHistory() {
     if (!_currentBookId) return;
 
-    // 避免重复加载
+    // 移除旧的历史面板，确保每次重新加载最新数据（否则翻页分析新章节后历史不刷新）
     var panel = document.getElementById("jl-panel-summary");
-    if (document.getElementById("jl-history-section")) return;
+    var oldSection = document.getElementById("jl-history-section");
+    if (oldSection) oldSection.remove();
 
     var API = await getAPI();
     var token = await getToken();
