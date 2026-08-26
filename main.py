@@ -56,6 +56,16 @@ def friendly_error(exc: Exception) -> str:
     # 兜底：隐藏技术细节
     return "操作失败，请稍后重试。如持续失败请联系客服 QQ：2313370765"
 
+
+_MODE_LABELS = {"brief": "快速概况", "standard": "标准概况", "detailed": "详细前情提要"}
+
+
+def _other_modes_hint(detail_level: str) -> str:
+    """生成「可切换另外两种概况模式」的提示文案"""
+    others = [label for key, label in _MODE_LABELS.items() if key != detail_level]
+    return "也可切换「" + " / ".join(others) + "」模式再试。"
+
+
 app = FastAPI(title="Novel Copilot Backend")
 
 app.add_middleware(
@@ -1520,7 +1530,7 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                     if "安全过滤" in err_msg or "内容安全" in err_msg:
                         summary = {"summary": f"⚠️ {err_msg[:200]}"}
                     else:
-                        summary = {"summary": f"AI 服务暂时不可用，请稍后重试。持续失败请联系客服 QQ：2313370765"}
+                        summary = {"summary": f"AI 服务暂时不可用，请稍后重试。{_other_modes_hint(req.detail_level)}持续失败请联系客服 QQ：2313370765"}
                 yield f"data: {json.dumps({'type': 'summary', 'data': summary}, ensure_ascii=False)}\n\n"
                 await asyncio.sleep(0.5)  # 让用户看清摘要再更新详情
 
@@ -1623,7 +1633,7 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
                     ai_error = True
                     import logging
                     logging.warning("analyze_guest_progressive: summary call failed for guest=%s: %s", guest_username[:16], str(e)[:200])
-                    summary = {"summary": f"AI 服务暂时不可用（{str(e)[:100]}），请稍后重试。持续失败请联系客服 QQ：2313370765"}
+                    summary = {"summary": f"AI 服务暂时不可用（{str(e)[:100]}），请稍后重试。{_other_modes_hint(req.detail_level)}持续失败请联系客服 QQ：2313370765"}
                 yield f"data: {json.dumps({'type': 'summary', 'data': summary}, ensure_ascii=False)}\n\n"
                 await asyncio.sleep(0.5)  # 让用户看清摘要再更新详情
 
