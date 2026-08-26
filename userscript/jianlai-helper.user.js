@@ -416,6 +416,7 @@
 
   function getBookTitle() {
     const selectors = [
+      ".muye-reader-nav-title",
       ".book-title", ".book-name", ".novel-title",
       "[class*='bookName']", "[class*='book_name']",
       "h1 a", "h2 a", ".book-info h1",
@@ -429,6 +430,13 @@
     const meta = document.querySelector("meta[property='og:novel:book_name'], meta[name='book-name']");
     const metaText = meta?.getAttribute("content")?.trim();
     if (metaText) return metaText;
+    // 番茄小说兜底：document.title 格式 "{书名}第X章 {章节名}_番茄小说官网"
+    if (/fanqienovel\.com/i.test(location.hostname)) {
+      const t = (document.title || "").replace(/[_-]番茄小说官网.*$/, "");
+      const tm = t.match(/^(.*?)(第\s*[0-9一二三四五六七八九十百千万零]+\s*[章节卷])/);
+      if (tm) { const bt = tm[1].trim(); if (bt) return bt; }
+      if (t && t.length < 100) return t;
+    }
     const m = location.pathname.match(/\/book\/([^/]+)/);
     if (m) return decodeURIComponent(m[1]);
     return "";
