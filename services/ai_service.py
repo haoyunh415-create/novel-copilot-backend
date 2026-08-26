@@ -167,7 +167,7 @@ def _call_ai(messages: list[dict], temperature: float = 0.2, timeout: int = 35, 
             last_error = RuntimeError("无法连接 AI 服务")
             if attempt < max_retries - 1:
                 import time
-                time.sleep(1)
+                time.sleep(2 ** (attempt + 1))  # 指数退避 2s/4s/8s，给网络抖动更多恢复时间
                 continue
 
     raise last_error or RuntimeError("AI 调用失败")
