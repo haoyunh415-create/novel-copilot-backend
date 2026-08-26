@@ -275,9 +275,39 @@
         .filter((t) => t.length > 8);
       bestText = texts.join("\n");
     }
+    // 质量检测 1：字体加密乱码（番茄小说把汉字映射到 Unicode 私用区 PUA 字符）
+    var puaCount = 0;
+    for (var i = 0; i < bestText.length; i++) {
+      var cp = bestText.codePointAt(i);
+      if ((cp >= 0xE000 && cp <= 0xF8FF) || (cp >= 0xF0000 && cp <= 0xFFFFD)) {
+        puaCount++;
+        if (cp > 0xFFFF) i++;
+      }
+    }
+    if (bestText.length > 0 && puaCount / bestText.length > 0.15) {
+      _cachedText = "";
+      _cachedTextUrl = location.href;
+      return "";
+    }
+    // 质量检测 2：中文占比太低说明是乱码/混淆
+    var chineseChars = (bestText.match(/[一-鿿㐀-䶿]/g) || []).length;
+    var ratio = bestText.length > 0 ? chineseChars / bestText.length : 0;
+    if (ratio < 0.15 && bestText.length > 50) {
+      _cachedText = "";
+      _cachedTextUrl = location.href;
+      return "";
+    }
     _cachedText = bestText.split("\n").filter(function(l){return l.length>3}).slice(0,150).join("\n");
     _cachedTextUrl = location.href;
     return _cachedText;
+  }
+
+  function isFanqieSite() {
+    try {
+      return /fanqienovel\.com/i.test(location.hostname);
+    } catch (_) {
+      return false;
+    }
   }
 
   function getBookTitle() {
@@ -881,7 +911,9 @@
 
     var text = getChapterText();
     if (text.length < 80) {
-      setText("#jl-summary", "没有识别到足够的正文内容。");
+      setText("#jl-summary", isFanqieSite()
+        ? "⚠️ 番茄小说正文已加密，暂无法自动分析。\n\n请手动复制本章正文后粘贴重试，或换起点等其它网站。"
+        : "没有识别到足够的正文内容。");
       return;
     }
 
@@ -1143,7 +1175,9 @@
 
     const text = getChapterText();
     if (text.length < 80) {
-      setText("#jl-summary", "没有识别到足够的正文内容。");
+      setText("#jl-summary", isFanqieSite()
+        ? "⚠️ 番茄小说正文已加密，暂无法自动分析。\n\n请手动复制本章正文后粘贴重试，或换起点等其它网站。"
+        : "没有识别到足够的正文内容。");
       return;
     }
 

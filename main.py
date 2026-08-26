@@ -363,7 +363,9 @@ def _get_cached_analysis(conn, text_hash: str, detail_level: str, spoiler_free: 
 
 
 def _cache_analysis(conn, text_hash: str, detail_level: str, spoiler_free: int, result: dict):
-    """将分析结果写入全局缓存。INSERT OR IGNORE 自动处理并发重复。"""
+    """将分析结果写入全局缓存。INSERT OR IGNORE 自动处理并发重复。拒绝文案不写缓存。"""
+    if _is_rejection_result(result):
+        return
     conn.execute(
         "INSERT OR IGNORE INTO analysis_cache (text_hash, detail_level, spoiler_free, result_json, created_at) VALUES (?, ?, ?, ?, ?)",
         (text_hash, detail_level, spoiler_free, json.dumps(result, ensure_ascii=False), int(time.time())),
@@ -465,6 +467,40 @@ def create_token(username: str):
 def text_hash(text: str):
     normalized = "\n".join(line.strip() for line in text.splitlines() if line.strip())
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _looks_garbled(text: str) -> bool:
+    """检测正文是否疑似字体加密乱码（如番茄小说的 PUA 私用区字符）。
+
+    番茄等站点把正文汉字映射到 Unicode 私用区码点（U+E000–U+F8FF 或补充私用区
+    U+F0000–U+FFFFD），靠 @font-face 自定义字体渲染回正常汉字。直接 innerText
+    读到的就是这些私用区字符——中文占比极低但文本长度正常。正常小说正文几乎
+    不会出现私用区字符，因此「私用区字符占比 > 阈值」可可靠判定为乱码。
+    """
+    if not text:
+        return False
+    total = len(text)
+    if total < 50:
+        return False
+    pua_count = 0
+    for ch in text:
+        cp = ord(ch)
+        if 0xE000 <= cp <= 0xF8FF or 0xF0000 <= cp <= 0xFFFFD:
+            pua_count += 1
+    return pua_count / total > 0.15
+
+
+_REJECTION_MARKERS = ("请提供正常文本", "无法提取", "无法生成", "大量乱码", "有效情节")
+
+
+def _is_rejection_result(result: dict) -> bool:
+    """检测 AI 返回的摘要是否为「乱码拒绝文案」。这类结果不应写缓存、不应记历史。"""
+    if not isinstance(result, dict):
+        return False
+    summary = result.get("summary", "") or ""
+    if not summary:
+        return False
+    return any(marker in summary for marker in _REJECTION_MARKERS)
 
 
 def verify_token(token: str):
@@ -959,6 +995,8 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
     _cleanup_user_last_request()
 
     content_hash = text_hash(req.text)
+    if _looks_garbled(req.text):
+        return fail("本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试")
     spoiler_free = 1 if req.spoiler_free else 0
 
     # 解析或创建书籍
@@ -1071,6 +1109,12 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
             )
         return fail(friendly_error(exc))
 
+    # AI 返回拒绝文案（如番茄乱码）→ 退款，不写历史不写缓存
+    if _is_rejection_result(result):
+        with get_db() as conn:
+            conn.execute("UPDATE users SET credits = credits + 1 WHERE username=?", (user,))
+        return fail("本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试")
+
     # 保存分析结果
     with get_db() as conn:
         conn.execute(
@@ -1132,6 +1176,8 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
     _cleanup_user_last_request()
 
     content_hash = text_hash(req.text)
+    if _looks_garbled(req.text):
+        return fail("本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试")
     spoiler_int = 1 if req.spoiler_free else 0
 
     # 全局缓存检查
@@ -1246,6 +1292,15 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
             ):
                 if event_type == "done":
                     result = data["result"]
+                    if _is_rejection_result(result):
+                        # 拒绝文案：退款，不写历史不写缓存，发 error
+                        try:
+                            with get_db() as db_conn:
+                                db_conn.execute("UPDATE users SET credits = credits + 1 WHERE username=?", (user,))
+                        except Exception:
+                            pass
+                        yield f"data: {json.dumps({'type': 'error', 'message': '本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试'}, ensure_ascii=False)}\n\n"
+                        break
                     # 保存分析结果
                     try:
                         with get_db() as db_conn:
@@ -1311,6 +1366,8 @@ async def analyze_guest_stream(req: GuestAnalyzeRequest, http_req: Request):
         return fail(f"试用请求太频繁，请 {retry} 秒后再试")
 
     content_hash = text_hash(req.text)
+    if _looks_garbled(req.text):
+        return fail("本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试")
     spoiler_int = 1 if req.spoiler_free else 0
 
     with get_db() as conn:
@@ -1389,6 +1446,8 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
     _cleanup_user_last_request()
 
     content_hash = text_hash(req.text)
+    if _looks_garbled(req.text):
+        return fail("本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试")
     spoiler_int = 1 if req.spoiler_free else 0
     book_id = None
     with get_db() as conn:
@@ -1476,6 +1535,16 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                 result = {**summary, **details}
                 result["summary"] = summary.get("summary", "")  # 始终用摘要专用调用结果
 
+                if _is_rejection_result(result):
+                    # 拒绝文案：退款，不写历史不写缓存，发 error
+                    try:
+                        with get_db() as db_conn:
+                            db_conn.execute("UPDATE users SET credits = credits + 1 WHERE username=?", (user,))
+                    except Exception:
+                        pass
+                    yield f"data: {json.dumps({'type': 'error', 'message': '本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试'}, ensure_ascii=False)}\n\n"
+                    return
+
                 try:
                     with get_db() as db_conn:
                         if not ai_error:
@@ -1514,6 +1583,8 @@ async def analyze_guest_progressive(req: GuestAnalyzeRequest, http_req: Request)
         return fail(f"试用请求太频繁，请 {retry} 秒后再试")
 
     content_hash = text_hash(req.text)
+    if _looks_garbled(req.text):
+        return fail("本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试")
     spoiler_int = 1 if req.spoiler_free else 0
 
     with get_db() as conn:
@@ -1606,6 +1677,8 @@ def analyze_guest(req: GuestAnalyzeRequest, http_req: Request):
         return fail(f"试用请求太频繁，请 {retry} 秒后再试")
 
     content_hash = text_hash(req.text)
+    if _looks_garbled(req.text):
+        return fail("本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试")
 
     # 检查试用次数 + 全局缓存
     with get_db() as conn:
