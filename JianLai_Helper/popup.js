@@ -33,6 +33,17 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $("send-code-btn").addEventListener("click", sendEmailCode);
   $("email-login-btn").addEventListener("click", emailLogin);
+  // 弹窗重载会丢未提交的输入：记住邮箱和验证码，切屏/重开不丢
+  chrome.storage.local.get(["login_email", "login_code"], function (saved) {
+    if (saved.login_email) $("login-email").value = saved.login_email;
+    if (saved.login_code) $("login-code").value = saved.login_code;
+  });
+  $("login-email").addEventListener("input", function () {
+    chrome.storage.local.set({ login_email: this.value.trim() });
+  });
+  $("login-code").addEventListener("input", function () {
+    chrome.storage.local.set({ login_code: this.value.trim() });
+  });
   // 免登录试用
   var guestBtn = $("guest-trial-btn");
   if (guestBtn) guestBtn.addEventListener("click", startAnalyze);
@@ -366,6 +377,7 @@ async function emailLogin() {
     }, function () {
       showMessage(data.is_new ? "欢迎注册！已领取 10 次额度" : "登录成功", "success");
       $("login-code").value = "";
+      chrome.storage.local.remove("login_code");  // 登录成功后清除保存的验证码
       // 登录后引导
       showPostLoginGuide();
       renderState();

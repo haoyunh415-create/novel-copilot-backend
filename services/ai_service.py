@@ -396,6 +396,11 @@ JSON 格式：{{"characters":[{{"name":"","note":""}}],"foreshadowing":[{{"clue"
         parsed = _extract_json(raw)
         result = _normalize_result({**parsed, "summary": " "}, raw)
         result["summary"] = ""  # 摘要由 progressive 端点从 summary 调用填充
+        # 空结果视为失败：AI 偶尔返回「合法但空」的 JSON，不能让空人物/关系图被当成功写进缓存
+        chars = result.get("characters") or []
+        nodes = (result.get("graph") or {}).get("nodes") or []
+        if not chars and not nodes:
+            raise RuntimeError("AI 返回空人物与关系图")
         return result
 
     try:
