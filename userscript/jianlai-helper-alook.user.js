@@ -550,13 +550,13 @@
     while (node.firstChild) node.removeChild(node.firstChild);
   }
 
-  function createList(items, formatter) {
+  function createList(items, formatter, emptyText) {
     const list = document.createElement("div");
     list.className = "jl-list";
     if (!items?.length) {
       const empty = document.createElement("p");
       empty.className = "jl-empty";
-      empty.textContent = "暂无明显线索";
+      empty.textContent = emptyText || "暂无明显线索";
       list.appendChild(empty);
       return list;
     }
@@ -596,7 +596,7 @@
             '</div>' +
             '<div style="display:flex;gap:10px;align-items:flex-start">' +
               '<span style="flex-shrink:0;width:26px;height:26px;border-radius:50%;background:#f5a623;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">2</span>' +
-              '<span style="font-size:13px;line-height:1.6">点击右下角 <b style="color:#f5a623">"分析当前章节"</b> 按钮<br><small style="color:#8b7c72">AI 会自动提炼摘要、伏笔和人物关系</small></span>' +
+              '<span style="font-size:13px;line-height:1.6">点击右上角面板底部的 <b style="color:#f5a623">"分析当前章节"</b> 按钮（或右下角 <b style="color:#f5a623">⚡分析本章</b>）<br><small style="color:#8b7c72">AI 会自动提炼摘要、伏笔和人物关系</small></span>' +
             '</div>' +
             '<div style="display:flex;gap:10px;align-items:flex-start">' +
               '<span style="flex-shrink:0;width:26px;height:26px;border-radius:50%;background:#8d6e63;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">3</span>' +
@@ -613,6 +613,36 @@
       overlay.remove();
       localStorage.setItem(key, "1");
     });
+  }
+
+  // ═══════════ 悬浮入口按钮 ═══════════
+
+  function injectFloatingButton() {
+    if (document.getElementById("jl-floating-btn")) return;
+    // 仅当能提取到正文时才显示入口，避免在列表页/首页出现无意义按钮
+    try {
+      if (getChapterText().length < 80) return;
+    } catch (_) { return; }
+
+    const btn = document.createElement("button");
+    btn.id = "jl-floating-btn";
+    btn.type = "button";
+    btn.textContent = "⚡ 分析本章";
+    btn.style.cssText =
+      "position:fixed;bottom:20px;right:20px;z-index:2147483646;padding:12px 18px;" +
+      "border:0;border-radius:24px;background:linear-gradient(135deg,#E65100,#F57C00);" +
+      "color:#fff;font-size:14px;font-weight:600;cursor:pointer;" +
+      "box-shadow:0 4px 16px rgba(230,81,0,.35);" +
+      "font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;" +
+      "transition:transform .15s ease,box-shadow .15s ease";
+    btn.addEventListener("mouseenter", function () { btn.style.transform = "translateY(-2px)"; btn.style.boxShadow = "0 6px 20px rgba(230,81,0,.45)"; });
+    btn.addEventListener("mouseleave", function () { btn.style.transform = ""; btn.style.boxShadow = "0 4px 16px rgba(230,81,0,.35)"; });
+    btn.addEventListener("click", function () {
+      const win = createWindow();
+      win.querySelector("#jl-heading").textContent = getChapterTitle();
+      runAnalyze();
+    });
+    document.body.appendChild(btn);
   }
 
   // ═══════════ UI 创建 ═══════════
@@ -836,7 +866,7 @@
       const name = item.name || item.label || "未知人物";
       const note = item.note || item.role || "";
       return note ? name + "：" + note : name;
-    }));
+    }, "人物分析未完成，可重新分析"));
 
     clues.appendChild(createList(result.foreshadowing, (item) => {
       const clue = item.clue || item.text || "未命名线索";
@@ -1124,8 +1154,15 @@
 
   function drawGraph(graph) {
     const graphBox = document.getElementById("jl-graph");
-    if (!graphBox || !Array.isArray(graph?.nodes) || graph.nodes.length === 0) return;
-    if (!window.vis) { renderGraphAsText(graphBox, graph); return; }
+    if (!graphBox) return;
+    if (!window.vis) {
+      graphBox.innerHTML = '<div class="jl-ov-empty">图表库加载中，请稍后再试</div>';
+      return;
+    }
+    if (!Array.isArray(graph?.nodes) || graph.nodes.length === 0) {
+      graphBox.innerHTML = '<div class="jl-ov-empty">本章暂无人物关系数据</div>';
+      return;
+    }
 
     const nodes = graph.nodes.map((node) => ({
       ...node,
@@ -2671,6 +2708,8 @@
   function init() {
     if (!document.body) { setTimeout(init, 300); return; }
     createLauncher();
+    // 章节页显示悬浮入口按钮（一键分析，免去点插件弹窗的步骤）
+    injectFloatingButton();
   }
   init();
     // ═══════════ 划词查询人物 ═══════════
