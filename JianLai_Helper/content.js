@@ -2584,6 +2584,14 @@
   // 章节页显示悬浮入口按钮（一键分析，免去点插件弹窗的步骤）
   injectFloatingButton();
 
+  // SPA 站点（番茄等）翻页不整页刷新、正文异步加载，浮按钮需按需补注入；
+  // injectFloatingButton 内部有「已存在 / 正文不足 80 字」守卫，轮询调用安全幂等
+  setInterval(function () {
+    if (!document.getElementById("jl-floating-btn")) {
+      injectFloatingButton();
+    }
+  }, 1500);
+
   chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {
     if (req.action !== "START_ANALYZE") return;
     const win = createWindow();
