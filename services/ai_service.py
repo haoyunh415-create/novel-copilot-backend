@@ -29,6 +29,31 @@ API_KEY = os.getenv("DEEPSEEK_API_KEY")
 API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
 MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
+# —— Token 用量统计（量化「分级汇总 vs 整书一次性注入」用）——
+_USAGE_STATS = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "calls": 0}
+
+
+def _accumulate_usage(payload: dict) -> None:
+    """从一次 LLM 响应的 payload 累加 usage 字段（DeepSeek 返回 prompt/completion/total tokens）。"""
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return
+    _USAGE_STATS["prompt_tokens"] += int(usage.get("prompt_tokens", 0) or 0)
+    _USAGE_STATS["completion_tokens"] += int(usage.get("completion_tokens", 0) or 0)
+    _USAGE_STATS["total_tokens"] += int(usage.get("total_tokens", 0) or 0)
+    _USAGE_STATS["calls"] += 1
+
+
+def get_usage_stats() -> dict:
+    """返回累计 token 用量统计（只读副本）。"""
+    return dict(_USAGE_STATS)
+
+
+def reset_usage_stats() -> None:
+    """清零累计统计。"""
+    for key in _USAGE_STATS:
+        _USAGE_STATS[key] = 0
+
 
 def _strip_ai_chatter(text: str) -> str:
     """移除 AI 在 JSON 前后的废话（"好的，这是分析结果：" 等）"""
@@ -149,6 +174,7 @@ def _call_ai(messages: list[dict], temperature: float = 0.2, timeout: int = 35, 
             )
             response.raise_for_status()
             payload = response.json()
+            _accumulate_usage(payload)
             choice = (payload.get("choices") or [{}])[0]
             return payload, choice.get("finish_reason", "stop")
         except requests.Timeout:
@@ -333,7 +359,15 @@ def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = Tru
 
 
 def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = True):
-    """生成人物、伏笔、术语、关系图（不含摘要），~8-12 秒"""
+    """生成人物、伏笔、术语、关系图（不含摘要），~8-12 秒
+
+    历史坑：这里曾用 `except Exception: return 空数组` 静默吞掉一切失败，
+    导致前端把「详情分析失败」误判成「本章无人物/关系图空白」，且空结果被写进缓存。
+    现在改为：失败先重试一次（更短文本 + 稍高温度），仍失败则打日志并抛出异常，
+    交给 progressive 端点兜底（显示可用错误提示、不写缓存）。
+    """
+    import logging
+
     if not API_KEY:
         raise RuntimeError("缺少 DEEPSEEK_API_KEY")
 
@@ -343,28 +377,39 @@ def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = Tru
     )
     text_input = text[:8000] if len(text) > 8000 else text
 
-    prompt = f"""章节标题：{chapter_title}。{spoiler_rule}
+    def _build_prompt(src_text: str) -> str:
+        return f"""章节标题：{chapter_title}。{spoiler_rule}
 分析以下内容，严格按 JSON 返回（只输出 JSON，不要任何其他文字）：
 - characters：至少列出 1 个关键人物，最多 5 个。即使章节出场人物少，也要至少标注本章最重要的 1 个人物（name + note 15字以内，说明其本章动向和重要性）
 - foreshadowing：0-3 条伏笔线索。如果章节有值得关注的细节、反常事件、暗示未来发展的内容，请标注（clue + reason 15字以内 + confidence 0-100）。尽量不要返回空数组
 - terms：0-3 个关键术语（term + meaning）
 - graph：人物关系 nodes（id=n1,n2...、label、level=core/normal）+ edges（from、to、label），至少要有 1 个 node
 JSON 格式：{{"characters":[{{"name":"","note":""}}],"foreshadowing":[{{"clue":"","reason":"","confidence":70}}],"terms":[{{"term":"","meaning":""}}],"graph":{{"nodes":[{{"id":"n1","label":"","level":"core"}}],"edges":[{{"from":"n1","to":"n2","label":""}}]}}}}
-正文：{text_input}"""
+正文：{src_text}"""
 
-    payload, _finish = _call_ai([
-        {"role": "system", "content": "你是一个专业的小说分析助手，只返回 JSON，不输出任何其他内容。"},
-        {"role": "user", "content": prompt},
-    ], temperature=0.2, timeout=30, max_retries=2, max_tokens=3072)
-
-    try:
+    def _parse_once(src_text: str, max_tok: int, temp: float) -> dict:
+        payload, _finish = _call_ai([
+            {"role": "system", "content": "你是一个专业的小说分析助手，只返回 JSON，不输出任何其他内容。"},
+            {"role": "user", "content": _build_prompt(src_text)},
+        ], temperature=temp, timeout=30, max_retries=2, max_tokens=max_tok)
         raw = payload["choices"][0]["message"]["content"]
         parsed = _extract_json(raw)
         result = _normalize_result({**parsed, "summary": " "}, raw)
         result["summary"] = ""  # 摘要由 progressive 端点从 summary 调用填充
         return result
-    except Exception:
-        return {"summary": "", "characters": [], "foreshadowing": [], "terms": [], "graph": {"nodes": [], "edges": []}}
+
+    try:
+        return _parse_once(text_input, max_tok=4096, temp=0.2)
+    except Exception as first_err:
+        logging.warning("analyze_details_only: first attempt failed: %s", str(first_err)[:200])
+        # 重试一次：更短文本 + 稍高温度，绕过可能的截断 / 内容安全过滤
+        short_text = text_input[:4000]
+        if len(short_text) >= 500:
+            try:
+                return _parse_once(short_text, max_tok=3072, temp=0.4)
+            except Exception as second_err:
+                logging.warning("analyze_details_only: retry failed: %s", str(second_err)[:200])
+        raise RuntimeError("人物/关系图分析失败，请稍后重试或切换模式再试") from first_err
 
 
 def analyze_text_stream(text: str, chapter_title: str, detail_level: str = "standard", spoiler_free: bool = True):
