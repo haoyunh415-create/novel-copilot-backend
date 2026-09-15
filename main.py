@@ -354,6 +354,41 @@ def init_db():
             """
         )
 
+        # 批量分析任务表（一个任务对应一本书的多个章节）
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS batch_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                book_id INTEGER DEFAULT NULL,
+                book_title TEXT NOT NULL,
+                total INTEGER NOT NULL DEFAULT 0,
+                done INTEGER NOT NULL DEFAULT 0,
+                failed INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending',
+                detail_level TEXT NOT NULL DEFAULT 'standard',
+                spoiler_free INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL
+            )
+            """
+        )
+        # 批量分析子项表（每个章节一行）
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS batch_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL REFERENCES batch_jobs(id),
+                chapter_title TEXT NOT NULL,
+                chapter_index INTEGER DEFAULT NULL,
+                source_url TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                text_hash TEXT,
+                error TEXT DEFAULT '',
+                created_at INTEGER NOT NULL
+            )
+            """
+        )
+
 
 def _get_cached_analysis(conn, text_hash: str, detail_level: str, spoiler_free: int):
     """从全局缓存读取分析结果。返回 dict 或 None。"""
