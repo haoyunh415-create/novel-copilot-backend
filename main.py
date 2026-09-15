@@ -647,7 +647,9 @@ def _analyze_one(user, *, text, chapter_title, source_url, detail_level, spoiler
             if bonus > 0:
                 raise _InsufficientCredits("额度不足，但今日签到已领取 8 次！刷新页面后重试")
             raise _InsufficientCredits("额度不足，每日签到可领 8 次免费额度，打开插件弹窗自动领取")
-        conn.execute("UPDATE users SET credits = credits - 1 WHERE username=? AND credits > 0", (user,))
+        cur = conn.execute("UPDATE users SET credits = credits - 1 WHERE username=? AND credits > 0", (user,))
+        if cur.rowcount == 0:
+            raise _InsufficientCredits("额度不足，每日签到可领 8 次免费额度，打开插件弹窗自动领取")
         log_usage(conn, user, "analyze", f"分析章节: {chapter_title}", -1)
 
     analysis_text = text
@@ -1300,15 +1302,10 @@ def batch_submit(job_id: int, req: BatchSubmitRequest, user=Depends(get_user)):
         if job["status"] == "done":
             return fail("任务已完成")
 
+    # 批量分析不再受单章节 2 秒节流约束（保留 20/分钟 限流），允许前端并发提交提速
     allowed, retry = _check_rate_limit("analyze", user=user)
     if not allowed:
         return fail(f"请求太频繁，请 {retry} 秒后再试")
-    now = time.time()
-    last = user_last_request.get(user, 0)
-    if now - last < 2:
-        return fail("请求太频繁了，请稍后再试")
-    user_last_request[user] = now
-    _cleanup_user_last_request()
 
     with get_db() as conn:
         conn.execute("UPDATE batch_jobs SET status='running' WHERE id=?", (job_id,))
@@ -1375,6 +1372,19 @@ def batch_skip(job_id: int, req: BatchSkipRequest, user=Depends(get_user)):
         )
         _recount_job(conn, job_id)
     return ok({"item_id": req.item_id, "status": "skipped"})
+
+
+@app.post("/api/analyze/batch/clear")
+def batch_clear(user=Depends(get_user)):
+    """清空当前用户的所有批量任务（含条目）；不影响已生成的分析记录。"""
+    with get_db() as conn:
+        rows = conn.execute("SELECT id FROM batch_jobs WHERE username=?", (user,)).fetchall()
+        job_ids = [r["id"] for r in rows]
+        for jid in job_ids:
+            conn.execute("DELETE FROM batch_items WHERE job_id=?", (jid,))
+        if job_ids:
+            conn.execute("DELETE FROM batch_jobs WHERE username=?", (user,))
+    return ok({"deleted": len(job_ids)})
 
 
 @app.get("/api/analyze/batch/{job_id}")

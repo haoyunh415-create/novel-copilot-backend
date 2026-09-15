@@ -2605,8 +2605,14 @@
       "position:fixed;right:20px;bottom:120px;z-index:2147483646;padding:10px 16px;" +
       "background:#E65100;color:#fff;border:none;border-radius:24px;font-size:14px;cursor:pointer;" +
       "box-shadow:0 4px 16px rgba(230,81,0,.35);";
-    btn.addEventListener("click", function () { showBatchConfigPanel(); });
+    btn.addEventListener("click", function () { startBatchFlow(); });
     document.body.appendChild(btn);
+  }
+
+  // 目录页或章节页都显示「批量分析」入口（章节页点击自动跳目录）
+  function shouldShowBatchEntry() {
+    if (detectCatalogPage()) return true;
+    try { return getChapterText().length >= 80; } catch (_) { return false; }
   }
 
   async function runBatchFromCatalog(n) {
@@ -2645,7 +2651,8 @@
       '<div style="display:flex;gap:8px">' +
       '<button id="jl-batch-start" style="flex:1;padding:9px;background:#E65100;color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer">开始</button>' +
       '<button id="jl-batch-cancel" style="flex:1;padding:9px;background:#eee;color:#333;border:none;border-radius:8px;font-size:13px;cursor:pointer">取消</button>' +
-      '</div>';
+      '</div>' +
+      '<div id="jl-batch-clear" style="margin-top:10px;font-size:12px;color:#A1887F;cursor:pointer;text-align:center;text-decoration:underline">清空历史任务</div>';
     document.body.appendChild(panel);
     loadBatchResumeEntry();
     document.getElementById("jl-batch-start").addEventListener("click", function () {
@@ -2657,6 +2664,15 @@
     });
     document.getElementById("jl-batch-cancel").addEventListener("click", function () {
       panel.remove();
+    });
+    document.getElementById("jl-batch-clear").addEventListener("click", function () {
+      if (!confirm("确定清空所有批量分析历史任务吗？已生成的分析结果不受影响。")) return;
+      clearBatchTasks().then(function (n) {
+        var el = document.getElementById("jl-batch-clear");
+        if (el) el.textContent = n > 0 ? "已清空 " + n + " 个任务" : "暂无历史任务";
+        var resumeEl = document.getElementById("jl-batch-resume");
+        if (resumeEl) resumeEl.style.display = "none";
+      });
     });
   }
 
@@ -2685,6 +2701,20 @@
         });
       }
     }).catch(function () {});
+  }
+
+  function clearBatchTasks() {
+    return getAPI().then(function (API) {
+      return getToken().then(function (token) {
+        if (!token) return 0;
+        return fetchWithRetry(API + "/api/analyze/batch/clear", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        }, 2).then(function (r) { return r.json(); }).then(function (b) {
+          return (b && b.data && b.data.deleted) || 0;
+        });
+      });
+    }).catch(function () { return 0; });
   }
 
   // 弹窗入口：目录页直接弹配置面板；否则推导目录页跳转
@@ -2812,15 +2842,19 @@
     var panel = document.createElement("div");
     panel.id = "jl-batch-panel";
     panel.style.cssText =
-      "position:fixed;right:20px;bottom:170px;z-index:2147483646;width:260px;background:#fffef9;" +
-      "border-radius:12px;padding:14px;box-shadow:0 12px 40px rgba(0,0,0,.28);font-size:13px;color:#333;";
+      "position:fixed;right:20px;bottom:170px;z-index:2147483646;width:320px;background:#fffef9;" +
+      "border-radius:12px;padding:14px;box-shadow:0 12px 40px rgba(0,0,0,.28);font-size:13px;color:#333;" +
+      "max-height:72vh;display:flex;flex-direction:column;";
     panel.innerHTML =
       '<div style="font-weight:600;margin-bottom:8px">📚 批量分析</div>' +
       '<div id="jl-batch-status">准备中…</div>' +
       '<div id="jl-batch-bar" style="height:8px;background:#eee;border-radius:4px;margin:10px 0;overflow:hidden">' +
       '<div id="jl-batch-fill" style="height:100%;width:0%;background:#E65100"></div></div>' +
-      '<button id="jl-batch-pause" style="margin-right:8px">暂停</button>' +
-      '<button id="jl-batch-close">关闭</button>';
+      '<div id="jl-batch-results" style="overflow-y:auto;flex:1;min-height:0;margin-top:2px"></div>' +
+      '<div style="display:flex;gap:8px;margin-top:10px">' +
+      '<button id="jl-batch-pause" style="flex:1;padding:7px;border:1.5px solid #DDD0C4;background:#fff;border-radius:8px;cursor:pointer;font-size:12px">暂停</button>' +
+      '<button id="jl-batch-close" style="flex:1;padding:7px;border:none;background:#5D4037;color:#fff;border-radius:8px;cursor:pointer;font-size:12px">关闭</button>' +
+      '</div>';
     document.body.appendChild(panel);
     document.getElementById("jl-batch-pause").addEventListener("click", function () {
       __jlBatchPaused = true;
@@ -2829,6 +2863,34 @@
     document.getElementById("jl-batch-close").addEventListener("click", function () {
       panel.remove();
     });
+  }
+
+  function escBatch(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  // 把单章分析结果（摘要 + 前几条伏笔）追加到结果区
+  function appendBatchResult(title, analysis) {
+    var box = document.getElementById("jl-batch-results");
+    if (!box) return;
+    var summary = (analysis && analysis.summary) || "";
+    var clues = (analysis && analysis.foreshadowing) || [];
+    var h = '<div style="font-weight:600;color:#3E2723;font-size:12px">' + escBatch(title) + '</div>';
+    if (summary) {
+      h += '<div style="font-size:12px;color:#4E3E33;margin-top:3px;line-height:1.5">' + escBatch(summary) + '</div>';
+    }
+    for (var i = 0; i < clues.length && i < 3; i++) {
+      var c = clues[i] || {};
+      var t = c.clue || c.content || c.text || "";
+      if (t) h += '<div style="font-size:11px;color:#8D6E63;margin-top:3px">▸ ' + escBatch(t) + '</div>';
+    }
+    var item = document.createElement("div");
+    item.style.cssText = "padding:8px 0;border-bottom:1px solid #F0E8DE;";
+    item.innerHTML = h;
+    box.appendChild(item);
+    box.scrollTop = box.scrollHeight;
   }
 
   function updateBatchPanel(done, total, text) {
@@ -2841,6 +2903,7 @@
   async function runBatchJob(jobData) {
     // 兼容两种来源：create 返回 {job_id,...}；batch_list 返回 {id,...}
     var jobId = jobData.job_id || jobData.id;
+    var total = jobData.total || 0;
     showBatchPanel();
     var API = await getAPI();
     var token = await getToken();
@@ -2849,79 +2912,116 @@
     }, 2);
     var jobBody = await jobResp.json();
     var items = (jobBody.data && jobBody.data.items) || [];
+    if (!total) total = items.length;
     var pending = items.filter(function (i) { return i.status === "pending" || i.status === "failed"; });
-    var done = jobData.total - pending.length;
-    updateBatchPanel(done, jobData.total);
+    var done = total - pending.length;
+    updateBatchPanel(done, total);
 
-    for (var item of pending) {
-      if (__jlBatchPaused) { updateBatchPanel(done, jobData.total, "已暂停（可点击「批量分析」续跑）"); return; }
-      var fetched = null;
-      try {
-        fetched = await fetchChapterText(item.source_url);
-      } catch (e) {
-        updateBatchPanel(done, jobData.total, "抓取失败：" + item.chapter_title);
-        continue;
-      }
-      var text = fetched && fetched.text ? fetched.text : "";
-      var isLocked = !!(fetched && fetched.paywall);
-      if (isLocked || !text || text.length < 80) {
-        if (isLocked) {
-          // 付费/会员章节：跳过不扣费
-          var skipResp = await fetchWithRetry(API + "/api/analyze/batch/" + jobId + "/skip", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-            body: JSON.stringify({ item_id: item.id }),
-          }, 2);
-          var skipBody = await skipResp.json();
-          if (skipBody.success) {
-            done++;
-            updateBatchPanel(done, jobData.total, "已跳过付费章节：" + item.chapter_title);
-          } else {
-            updateBatchPanel(done, jobData.total, "跳过失败：" + item.chapter_title);
-          }
-        } else {
-          updateBatchPanel(done, jobData.total, "抓取失败：" + item.chapter_title);
-        }
-        continue;
-      }
-      var submitResp = await fetchWithRetry(API + "/api/analyze/batch/" + jobId + "/submit", {
+    function skipItem(item) {
+      return fetchWithRetry(API + "/api/analyze/batch/" + jobId + "/skip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify({ item_id: item.id }),
+      }, 2).then(function (r) { return r.json(); });
+    }
+    function submitItem(item, text) {
+      return fetchWithRetry(API + "/api/analyze/batch/" + jobId + "/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
         body: JSON.stringify({ item_id: item.id, text: text }),
-      }, 2);
-      var submitBody = await submitResp.json();
-      if (!submitBody.success) {
-        if (/额度不足/.test(submitBody.error || "")) {
-          updateBatchPanel(done, jobData.total, "额度不足，任务已暂停，攒够后点击「批量分析」续跑");
-          return;
-        }
-        if (/请求太频繁/.test(submitBody.error || "")) {
-          await new Promise(function (res) { setTimeout(res, 3000); });
-          submitResp = await fetchWithRetry(API + "/api/analyze/batch/" + jobId + "/submit", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-            body: JSON.stringify({ item_id: item.id, text: text }),
-          }, 2);
-          submitBody = await submitResp.json();
-        }
-      }
-      if (submitBody.success) { done++; }
-      updateBatchPanel(done, jobData.total);
+      }, 2).then(function (r) { return r.json(); });
     }
+
+    // 1) 并行抓取全部待处理章节正文（并发 4），消除逐章串行抓取延迟
+    var FETCH_POOL = 4;
+    var fetched = new Array(pending.length);
+    var fi = 0;
+    var fetchWorkers = [];
+    for (var w = 0; w < Math.min(FETCH_POOL, pending.length); w++) {
+      fetchWorkers.push((async function () {
+        while (true) {
+          if (__jlBatchPaused) return;
+          var idx = fi++;
+          if (idx >= pending.length) return;
+          var item = pending[idx];
+          try {
+            var f = await fetchChapterText(item.source_url);
+            fetched[idx] = { item: item, text: (f && f.text) || "", paywall: !!(f && f.paywall) };
+          } catch (e) {
+            fetched[idx] = { item: item, text: "", paywall: false, error: true };
+          }
+        }
+      })());
+    }
+    await Promise.all(fetchWorkers);
+
+    // 2) 并行提交（并发 2）：付费/空章节跳过，成功则即时展示摘要结果
+    var SUBMIT_POOL = 2;
+    var si = 0;
+    var submitWorkers = [];
+    for (var w2 = 0; w2 < Math.min(SUBMIT_POOL, pending.length); w2++) {
+      submitWorkers.push((async function () {
+        while (true) {
+          if (__jlBatchPaused) return;
+          var idx = si++;
+          if (idx >= pending.length) return;
+          var f = fetched[idx];
+          var item = f.item;
+          if (f.error) {
+            updateBatchPanel(done, total, "抓取失败：" + item.chapter_title);
+            continue;
+          }
+          if (f.paywall || !f.text || f.text.length < 80) {
+            if (f.paywall) {
+              var sb = await skipItem(item);
+              if (sb && sb.success) {
+                done++;
+                updateBatchPanel(done, total, "已跳过付费章节：" + item.chapter_title);
+              } else {
+                updateBatchPanel(done, total, "跳过失败：" + item.chapter_title);
+              }
+            } else {
+              updateBatchPanel(done, total, "抓取失败：" + item.chapter_title);
+            }
+            continue;
+          }
+          var body = await submitItem(item, f.text);
+          if (!(body && body.success)) {
+            var err = (body && body.error) || "";
+            if (/额度不足/.test(err)) {
+              updateBatchPanel(done, total, "额度不足，任务已暂停，攒够后点击「批量分析」续跑");
+              __jlBatchPaused = true;
+              return;
+            }
+            if (/请求太频繁/.test(err)) {
+              await new Promise(function (res) { setTimeout(res, 3000); });
+              body = await submitItem(item, f.text);
+            }
+          }
+          if (body && body.success) {
+            done++;
+            appendBatchResult(item.chapter_title, body.data && body.data.result && body.data.result.result);
+          }
+          updateBatchPanel(done, total);
+        }
+      })());
+    }
+    await Promise.all(submitWorkers);
+
     __jlBatchPaused = false;
-    updateBatchPanel(done, jobData.total, "✅ 完成：" + done + " 章");
+    updateBatchPanel(done, total, "✅ 完成：" + done + " 章");
   }
 
   // 章节页显示悬浮入口按钮（一键分析，免去点插件弹窗的步骤）
   injectFloatingButton();
 
-  // 目录页显示「批量分析」入口（仅当检测到章节链接列表）
-  if (detectCatalogPage()) { showBatchButton(); }
+  // 目录页或章节页显示「批量分析」入口（右下角悬浮）
+  if (shouldShowBatchEntry()) { showBatchButton(); }
   // 从章节页跳转而来：自动弹出批量配置面板
   autoOpenBatchIfFlagged();
   // 起点等站点目录章节列表常为异步加载，延迟重试几次以补挂按钮
   [1000, 3000, 6000].forEach(function (ms) {
-    setTimeout(function () { if (detectCatalogPage()) { showBatchButton(); } }, ms);
+    setTimeout(function () { if (shouldShowBatchEntry()) { showBatchButton(); } }, ms);
   });
 
   // SPA 站点（番茄等）翻页不整页刷新、正文异步加载，浮按钮需按需补注入；
@@ -2930,7 +3030,7 @@
     if (!document.getElementById("jl-floating-btn")) {
       injectFloatingButton();
     }
-    if (detectCatalogPage()) { showBatchButton(); }
+    if (shouldShowBatchEntry()) { showBatchButton(); }
   }, 1500);
 
   chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {
