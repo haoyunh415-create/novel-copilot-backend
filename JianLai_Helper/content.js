@@ -2581,8 +2581,75 @@
     }, 400);
   }
 
+  // ═══════════ 批量分析（目录页） ═══════════
+
+  function detectCatalogPage() {
+    var links = document.querySelectorAll("a[href]");
+    var chapterLike = 0;
+    for (var i = 0; i < links.length; i++) {
+      var href = links[i].getAttribute("href");
+      if (globalThis.JLBatchParser && globalThis.JLBatchParser.looksLikeChapterHref(href)) chapterLike++;
+      if (chapterLike >= 5) return true;
+    }
+    return false;
+  }
+
+  function showBatchButton() {
+    if (document.getElementById("jl-batch-btn")) return;
+    var btn = document.createElement("button");
+    btn.id = "jl-batch-btn";
+    btn.textContent = "📚 批量分析";
+    btn.style.cssText =
+      "position:fixed;right:20px;bottom:120px;z-index:2147483646;padding:10px 16px;" +
+      "background:#E65100;color:#fff;border:none;border-radius:24px;font-size:14px;cursor:pointer;" +
+      "box-shadow:0 4px 16px rgba(230,81,0,.35);";
+    btn.addEventListener("click", function () { runBatchFromCatalog(); });
+    document.body.appendChild(btn);
+  }
+
+  async function runBatchFromCatalog() {
+    var btn = document.getElementById("jl-batch-btn");
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ 解析中…"; }
+    var html = document.documentElement.outerHTML;
+    // site 形参暂未参与解析（batch_parser.parseCatalog 的 site 留待站点特化）；Task 8 才引入 detectSite
+    var list = globalThis.JLBatchParser.parseCatalog(html, "biquge");
+    if (!list.length) {
+      alert("未在目录页解析到章节列表");
+      if (btn) { btn.disabled = false; btn.textContent = "📚 批量分析"; }
+      return;
+    }
+    var job = await startBatchJob(list);
+    if (btn) { btn.disabled = false; btn.textContent = "📚 批量分析"; }
+    // 抓取循环由 Task 8 接入：if (job) runBatchJob(job);
+  }
+
+  async function startBatchJob(list) {
+    var API = await getAPI();
+    var token = await getToken();
+    if (!token) { alert("请先登录"); return null; }
+    var resp = await fetchWithRetry(API + "/api/analyze/batch/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+      body: JSON.stringify({
+        book_title: getBookTitle(),
+        author: getAuthor(),
+        chapter_list: list,
+        detail_level: localStorage.getItem("JL_Detail_Level") || "standard",
+        spoiler_free: true,
+      }),
+    }, 2);
+    var data = await resp.json();
+    if (!data.success) { alert(data.error || "创建任务失败"); return null; }
+    var d = data.data;
+    alert("任务已创建：共 " + d.total + " 章，需分析 " + d.pending + " 章，已跳过 " + d.skipped + " 章");
+    return d;
+  }
+
   // 章节页显示悬浮入口按钮（一键分析，免去点插件弹窗的步骤）
   injectFloatingButton();
+
+  // 目录页显示「批量分析」入口（仅当检测到章节链接列表）
+  if (detectCatalogPage()) { showBatchButton(); }
 
   // SPA 站点（番茄等）翻页不整页刷新、正文异步加载，浮按钮需按需补注入；
   // injectFloatingButton 内部有「已存在 / 正文不足 80 字」守卫，轮询调用安全幂等
