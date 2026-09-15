@@ -548,6 +548,133 @@ def _is_rejection_result(result: dict) -> bool:
     return any(marker in summary for marker in _REJECTION_MARKERS)
 
 
+class _InsufficientCredits(Exception):
+    def __init__(self, msg: str):
+        self.msg = msg
+
+
+class _AnalysisRejected(Exception):
+    def __init__(self, msg: str):
+        self.msg = msg
+
+
+def _resolve_book_id(user, book_title, author, source_url, chapter_title):
+    book_id = None
+    with get_db() as conn:
+        if book_title and book_title.strip():
+            book = conn.execute(
+                "SELECT id FROM books WHERE username=? AND title=?",
+                (user, book_title.strip()),
+            ).fetchone()
+            if book:
+                book_id = book["id"]
+            else:
+                cur = conn.execute(
+                    "INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (user, book_title.strip(), author or "", source_url or "", int(time.time())),
+                )
+                book_id = cur.lastrowid
+        if not book_id and source_url:
+            mm = re.match(r"(https?://[^/]+(/[^/]+/[^/]+/)?)", source_url)
+            url_prefix = mm.group(1) if mm else source_url[:60]
+            book = conn.execute(
+                "SELECT id FROM books WHERE username=? AND source_url_pattern=?",
+                (user, url_prefix),
+            ).fetchone()
+            if book:
+                book_id = book["id"]
+            else:
+                fallback_title = chapter_title or url_prefix
+                cur = conn.execute(
+                    "INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (user, fallback_title, author or "", url_prefix, int(time.time())),
+                )
+                book_id = cur.lastrowid
+    return book_id
+
+
+def _analyze_one(user, *, text, chapter_title, source_url, detail_level, spoiler_free, book_id, chapter_index):
+    content_hash = text_hash(text)
+    spoiler_int = 1 if spoiler_free else 0
+
+    with get_db() as conn:
+        cached = _get_cached_analysis(conn, content_hash, detail_level, spoiler_int)
+        if not cached:
+            old = conn.execute(
+                "SELECT result_json FROM analyses WHERE username=? AND text_hash=? AND detail_level=? AND spoiler_free=?",
+                (user, content_hash, detail_level, spoiler_int),
+            ).fetchone()
+            if old:
+                try:
+                    cached = json.loads(old["result_json"])
+                except json.JSONDecodeError:
+                    cached = None
+    if cached:
+        try:
+            with get_db() as conn:
+                _cache_analysis(conn, content_hash, detail_level, spoiler_int, cached)
+        except Exception:
+            pass
+        return {"result": cached, "cached": True}
+
+    with get_db() as conn:
+        bonus = try_daily_bonus(conn, user)
+        row = conn.execute("SELECT credits FROM users WHERE username=?", (user,)).fetchone()
+        if not row or row["credits"] <= 0:
+            if bonus > 0:
+                raise _InsufficientCredits("额度不足，但今日签到已领取 8 次！刷新页面后重试")
+            raise _InsufficientCredits("额度不足，每日签到可领 8 次免费额度，打开插件弹窗自动领取")
+        conn.execute("UPDATE users SET credits = credits - 1 WHERE username=? AND credits > 0", (user,))
+        log_usage(conn, user, "analyze", f"分析章节: {chapter_title}", -1)
+
+    analysis_text = text
+    truncated = False
+    MAX_CHARS = 8000
+    if len(analysis_text) > MAX_CHARS:
+        truncated = True
+        cut_point = analysis_text.rfind("\n", 0, MAX_CHARS)
+        if cut_point < MAX_CHARS // 2:
+            cut_point = MAX_CHARS
+        analysis_text = analysis_text[:cut_point] + "\n\n[提示：章节过长，已截取前 {:.0f}% 内容进行分析]".format(
+            cut_point / len(text) * 100
+        )
+
+    try:
+        result = analyze_text(analysis_text, chapter_title, detail_level=detail_level, spoiler_free=spoiler_free)
+    except Exception as exc:
+        with get_db() as conn:
+            conn.execute("UPDATE users SET credits = credits + 1 WHERE username=?", (user,))
+        raise _AnalysisRejected(friendly_error(exc))
+
+    if _is_rejection_result(result):
+        with get_db() as conn:
+            conn.execute("UPDATE users SET credits = credits + 1 WHERE username=?", (user,))
+        raise _AnalysisRejected("本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试")
+
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO analyses (username, book_id, chapter_title, chapter_index, source_url, text_hash, detail_level, spoiler_free, result_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user, book_id, chapter_title, chapter_index, source_url, content_hash, detail_level, spoiler_int, json.dumps(result, ensure_ascii=False), int(time.time())),
+        )
+        if book_id:
+            conn.execute(
+                "UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?",
+                (book_id, book_id),
+            )
+
+    try:
+        with get_db() as conn:
+            _cache_analysis(conn, content_hash, detail_level, spoiler_int, result)
+    except Exception:
+        pass
+
+    response_data = {"result": result, "cached": False, "book_id": book_id}
+    if truncated:
+        response_data["truncated"] = True
+        response_data["warning"] = f"章节过长（{len(text)}字），仅分析了前{len(analysis_text)}字"
+    return response_data
+
+
 def verify_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
@@ -1027,7 +1154,6 @@ def me(user=Depends(get_user)):
 
 @app.post("/api/analyze")
 def analyze(req: AnalyzeRequest, user=Depends(get_user)):
-    # 限流检查
     allowed, retry = _check_rate_limit("analyze", user=user)
     if not allowed:
         return fail(f"请求太频繁，请 {retry} 秒后再试")
@@ -1039,168 +1165,27 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
     user_last_request[user] = now
     _cleanup_user_last_request()
 
-    content_hash = text_hash(req.text)
     if _looks_garbled(req.text):
         return fail("本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试")
-    spoiler_free = 1 if req.spoiler_free else 0
 
-    # 解析或创建书籍
-    book_id = None
-    with get_db() as conn:
-        # 先尝试用书名匹配
-        if req.book_title and req.book_title.strip():
-            book = conn.execute(
-                "SELECT id FROM books WHERE username=? AND title=?",
-                (user, req.book_title.strip()),
-            ).fetchone()
-            if book:
-                book_id = book["id"]
-            else:
-                cur = conn.execute(
-                    "INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (user, req.book_title.strip(), req.author or "", req.source_url or "", int(time.time())),
-                )
-                book_id = cur.lastrowid
+    book_id = _resolve_book_id(user, req.book_title, req.author, req.source_url, req.chapter_title)
 
-        # 书名提取不到？用 URL 匹配
-        if not book_id and req.source_url:
-            # 从 URL 提取书的基础路径
-            m = re.match(r"(https?://[^/]+(/[^/]+/[^/]+/)?)", req.source_url)
-            url_prefix = m.group(1) if m else req.source_url[:60]
-            book = conn.execute(
-                "SELECT id FROM books WHERE username=? AND source_url_pattern=?",
-                (user, url_prefix),
-            ).fetchone()
-            if book:
-                book_id = book["id"]
-            else:
-                # 新建书，用章节标题当书名
-                fallback_title = req.chapter_title or url_prefix
-                cur = conn.execute(
-                    "INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (user, fallback_title, req.author or "", url_prefix, int(time.time())),
-                )
-                book_id = cur.lastrowid
-
-    # 检查缓存
-    with get_db() as conn:
-        cached = _get_cached_analysis(conn, content_hash, req.detail_level, spoiler_free)
-        if not cached:
-            old = conn.execute(
-                "SELECT result_json FROM analyses WHERE username=? AND text_hash=? AND detail_level=? AND spoiler_free=?",
-                (user, content_hash, req.detail_level, spoiler_free),
-            ).fetchone()
-            if old:
-                try:
-                    cached = json.loads(old["result_json"])
-                except json.JSONDecodeError:
-                    cached = None
-    if cached:
-        # 回写全局缓存，使其他用户也能命中此分析结果
-        try:
-            with get_db() as wb_conn:
-                _cache_analysis(wb_conn, content_hash, req.detail_level, spoiler_free, cached)
-        except Exception:
-            pass
-        return ok({"result": cached, "cached": True})
-
-    # 自动签到 + 扣额度
-    with get_db() as conn:
-        bonus = try_daily_bonus(conn, user)
-
-        row = conn.execute(
-            "SELECT credits FROM users WHERE username=?",
-            (user,),
-        ).fetchone()
-
-        if not row or row["credits"] <= 0:
-            if bonus > 0:
-                return fail("额度不足，但今日签到已领取 8 次！刷新页面后重试")
-            return fail("额度不足，每日签到可领 8 次免费额度，打开插件弹窗自动领取")
-
-        conn.execute(
-            "UPDATE users SET credits = credits - 1 WHERE username=? AND credits > 0",
-            (user,),
-        )
-        log_usage(conn, user, "analyze", f"分析章节: {req.chapter_title}", -1)
-
-    # 超长文本智能截断
-    analysis_text = req.text
-    truncated = False
-    MAX_CHARS = 8000
-    if len(analysis_text) > MAX_CHARS:
-        truncated = True
-        # 尽量在段落边界截断
-        cut_point = analysis_text.rfind("\n", 0, MAX_CHARS)
-        if cut_point < MAX_CHARS // 2:
-            cut_point = MAX_CHARS
-        analysis_text = analysis_text[:cut_point] + "\n\n[提示：章节过长，已截取前 {:.0f}% 内容进行分析]".format(
-            cut_point / len(req.text) * 100
-        )
-
-    # 调用 AI 分析
     try:
-        result = analyze_text(
-            analysis_text,
-            req.chapter_title,
+        data = _analyze_one(
+            user,
+            text=req.text,
+            chapter_title=req.chapter_title,
+            source_url=req.source_url,
             detail_level=req.detail_level,
             spoiler_free=req.spoiler_free,
+            book_id=book_id,
+            chapter_index=req.chapter_index,
         )
-    except Exception as exc:
-        with get_db() as conn:
-            conn.execute(
-                "UPDATE users SET credits = credits + 1 WHERE username=?",
-                (user,),
-            )
-        return fail(friendly_error(exc))
-
-    # AI 返回拒绝文案（如番茄乱码）→ 退款，不写历史不写缓存
-    if _is_rejection_result(result):
-        with get_db() as conn:
-            conn.execute("UPDATE users SET credits = credits + 1 WHERE username=?", (user,))
-        return fail("本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试")
-
-    # 保存分析结果
-    with get_db() as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO analyses (
-                username, book_id, chapter_title, chapter_index, source_url, text_hash,
-                detail_level, spoiler_free, result_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                user,
-                book_id,
-                req.chapter_title,
-                req.chapter_index,
-                req.source_url,
-                content_hash,
-                req.detail_level,
-                spoiler_free,
-                json.dumps(result, ensure_ascii=False),
-                int(time.time()),
-            ),
-        )
-        # 更新书的章节计数
-        if book_id:
-            conn.execute(
-                "UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?",
-                (book_id, book_id),
-            )
-
-    # 全局缓存在独立事务中写入，失败不回滚分析保存
-    try:
-        with get_db() as conn:
-            _cache_analysis(conn, content_hash, req.detail_level, spoiler_free, result)
-    except Exception:
-        pass
-
-    response_data = {"result": result, "cached": False, "book_id": book_id}
-    if truncated:
-        response_data["truncated"] = True
-        response_data["warning"] = f"章节过长（{len(req.text)}字），仅分析了前{len(analysis_text)}字"
-    return ok(response_data)
+        return ok(data)
+    except _InsufficientCredits as e:
+        return fail(e.msg)
+    except _AnalysisRejected as e:
+        return fail(e.msg)
 
 
 @app.post("/api/analyze/stream")
