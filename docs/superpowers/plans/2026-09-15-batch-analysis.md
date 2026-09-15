@@ -470,6 +470,8 @@ Expected: FAIL（端点不存在 404）
 
 - [ ] **Step 3: 新增 Pydantic 模型**
 
+先把 `main.py:14` 的 `from typing import Optional` 改为 `from typing import Optional, List`，再新增模型：
+
 ```python
 class BatchChapterItem(BaseModel):
     chapter_title: str = Field(min_length=1, max_length=120)
