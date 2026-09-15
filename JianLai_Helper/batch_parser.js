@@ -10,9 +10,13 @@
     return (t || "").replace(/\s+/g, " ").trim();
   }
 
+  function isChapterTitle(t) {
+    return /第\s*[0-9一二三四五六七八九十百千万零]+\s*[章节卷回]/.test(t || "");
+  }
+
   function looksLikeChapterHref(href) {
     if (!href) return false;
-    return /\/(\d{4,})(\.html?)?$/i.test(href) || /[?&](?:id|chapterId)=(\d{4,})/i.test(href);
+    return /\/(\d{3,})(\.html?)?\/?$/i.test(href) || /[?&](?:id|chapterId)=(\d{4,})/i.test(href);
   }
 
   function cnToInt(s) {
@@ -59,6 +63,7 @@
       if (!href) return;
       var title = cleanTitle(a.textContent || a.getAttribute("title"));
       if (!title || title.length < 1 || title.length > 120) return;
+      if (!isChapterTitle(title)) return;
       var abs = absoluteUrl(doc, href);
       if (!abs) return;
       if (seen.has(abs)) return;
@@ -101,6 +106,7 @@
     extractIndex: extractIndex,
     cnToInt: cnToInt,
     cleanTitle: cleanTitle,
+    isChapterTitle: isChapterTitle,
     looksLikeChapterHref: looksLikeChapterHref,
   };
 })();

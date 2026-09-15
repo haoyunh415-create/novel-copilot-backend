@@ -44,3 +44,42 @@ describe("extractChapterText", () => {
     expect(text).toContain("第二段正文内容");
   });
 });
+
+describe("isChapterTitle", () => {
+  it("recognizes chapter titles and rejects nav junk", () => {
+    expect(P.isChapterTitle("第一章 开端")).toBe(true);
+    expect(P.isChapterTitle("第1234章 大结局")).toBe(true);
+    expect(P.isChapterTitle("第五回 风云变")).toBe(true);
+    expect(P.isChapterTitle("首页")).toBe(false);
+    expect(P.isChapterTitle("登录")).toBe(false);
+    expect(P.isChapterTitle("")).toBe(false);
+  });
+});
+
+describe("looksLikeChapterHref", () => {
+  it("matches qidian chapter urls with trailing slash", () => {
+    expect(P.looksLikeChapterHref("//www.qidian.com/chapter/1049996017/915654463/")).toBe(true);
+    expect(P.looksLikeChapterHref("/chapter/1049996017/915654463/")).toBe(true);
+  });
+  it("matches 3-digit and trailing-slash numeric urls", () => {
+    expect(P.looksLikeChapterHref("/book/1/101.html")).toBe(true);
+    expect(P.looksLikeChapterHref("/12345/")).toBe(true);
+  });
+});
+
+describe("parseCatalog filters non-chapter links", () => {
+  it("drops nav junk and keeps qidian chapters", () => {
+    const html = `
+      <html><body>
+        <a href="https://www.qidian.com/">首页</a>
+        <a href="https://www.qidian.com/login">登录</a>
+        <a href="https://www.qidian.com/book/1049996017/">某书名</a>
+        <a href="https://www.qidian.com/chapter/1049996017/915654463/">第一章 开端</a>
+        <a href="https://www.qidian.com/chapter/1049996017/915654464/">第二章 转折</a>
+      </body></html>`;
+    const list = P.parseCatalog(html, "qidian");
+    expect(list).toHaveLength(2);
+    expect(list[0].chapter_title).toBe("第一章 开端");
+    expect(list[0].source_url).toContain("915654463");
+  });
+});

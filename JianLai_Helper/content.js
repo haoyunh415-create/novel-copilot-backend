@@ -2587,8 +2587,9 @@
     var links = document.querySelectorAll("a[href]");
     var chapterLike = 0;
     for (var i = 0; i < links.length; i++) {
-      var href = links[i].getAttribute("href");
-      if (globalThis.JLBatchParser && globalThis.JLBatchParser.looksLikeChapterHref(href)) chapterLike++;
+      var a = links[i];
+      var title = globalThis.JLBatchParser.cleanTitle(a.textContent || a.getAttribute("title"));
+      if (globalThis.JLBatchParser.isChapterTitle(title)) chapterLike++;
       if (chapterLike >= 5) return true;
     }
     return false;
@@ -2795,6 +2796,10 @@
 
   // 目录页显示「批量分析」入口（仅当检测到章节链接列表）
   if (detectCatalogPage()) { showBatchButton(); }
+  // 起点等站点目录章节列表常为异步加载，延迟重试几次以补挂按钮
+  [1000, 3000, 6000].forEach(function (ms) {
+    setTimeout(function () { if (detectCatalogPage()) { showBatchButton(); } }, ms);
+  });
 
   // SPA 站点（番茄等）翻页不整页刷新、正文异步加载，浮按钮需按需补注入；
   // injectFloatingButton 内部有「已存在 / 正文不足 80 字」守卫，轮询调用安全幂等
