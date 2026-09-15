@@ -1089,8 +1089,8 @@ git commit -m "feat: add batch parser module + vitest harness"
     var btn = document.getElementById("jl-batch-btn");
     if (btn) { btn.disabled = true; btn.textContent = "⏳ 解析中…"; }
     var html = document.documentElement.outerHTML;
-    var site = detectSite();
-    var list = globalThis.JLBatchParser.parseCatalog(html, site);
+    // site 形参暂未参与解析（batch_parser.parseCatalog 的 site 留待站点特化）；Task 8 才引入 detectSite
+    var list = globalThis.JLBatchParser.parseCatalog(html, "biquge");
     if (!list.length) {
       alert("未在目录页解析到章节列表");
       if (btn) { btn.disabled = false; btn.textContent = "📚 批量分析"; }
@@ -1098,7 +1098,7 @@ git commit -m "feat: add batch parser module + vitest harness"
     }
     var job = await startBatchJob(list);
     if (btn) { btn.disabled = false; btn.textContent = "📚 批量分析"; }
-    if (job) runBatchJob(job);
+    // 抓取循环由 Task 8 接入：if (job) runBatchJob(job);
   }
 
   async function startBatchJob(list) {
@@ -1261,9 +1261,15 @@ git commit -m "feat: catalog detection + batch button + create-job wiring"
   }
 ```
 
-- [ ] **Step 2: 支持续跑——`runBatchFromCatalog` 创建任务前先查未完成任务**
+- [ ] **Step 2: 接入 runBatchJob + 支持续跑**
 
-在 `runBatchFromCatalog` 的 `parseCatalog` 之后、`startBatchJob` 之前插入：
+先把 Task 7 留下的 `// 抓取循环由 Task 8 接入：if (job) runBatchJob(job);` 这行替换为真实调用：
+
+```javascript
+    if (job) runBatchJob(job);
+```
+
+再在 `runBatchFromCatalog` 的 `parseCatalog` 之后、`startBatchJob` 之前插入续跑查询：
 
 ```javascript
     var API = await getAPI();
