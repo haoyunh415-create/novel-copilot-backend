@@ -2621,20 +2621,6 @@
       return;
     }
     var list = globalThis.JLBatchParser.selectLatest(all, n || 10);
-    var API = await getAPI();
-    var token = await getToken();
-    var listResp = await fetchWithRetry(API + "/api/analyze/batch", {
-      headers: { "Authorization": "Bearer " + token },
-    }, 2);
-    var listBody = await listResp.json();
-    var unfinished = (listBody.data && listBody.data.jobs) || [];
-    if (unfinished.length) {
-      if (confirm("检测到 " + unfinished.length + " 个未完成任务，是否续跑最近一个？")) {
-        runBatchJob(unfinished[0]);
-        if (btn) { btn.disabled = false; btn.textContent = "📚 批量分析"; }
-        return;
-      }
-    }
     var job = await startBatchJob(list);
     if (btn) { btn.disabled = false; btn.textContent = "📚 批量分析"; }
     if (job) runBatchJob(job);
@@ -2652,6 +2638,7 @@
       "border-radius:12px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.28);font-size:13px;color:#333;";
     panel.innerHTML =
       '<div style="font-weight:600;margin-bottom:10px">📚 批量分析</div>' +
+      '<div id="jl-batch-resume" style="display:none;margin-bottom:8px;font-size:12px;color:#E65100;cursor:pointer;text-decoration:underline"></div>' +
       '<div style="margin-bottom:8px;color:#666;font-size:12px;line-height:1.5">分析最新几章？<br>付费/会员章节会自动跳过、不扣额度</div>' +
       '<input id="jl-batch-count" type="number" min="1" max="500" value="' + saved + '" ' +
       'style="width:100%;padding:8px;border:1.5px solid #DDD0C4;border-radius:8px;margin-bottom:12px;font-size:14px">' +
@@ -2660,6 +2647,7 @@
       '<button id="jl-batch-cancel" style="flex:1;padding:9px;background:#eee;color:#333;border:none;border-radius:8px;font-size:13px;cursor:pointer">取消</button>' +
       '</div>';
     document.body.appendChild(panel);
+    loadBatchResumeEntry();
     document.getElementById("jl-batch-start").addEventListener("click", function () {
       var n = parseInt(document.getElementById("jl-batch-count").value, 10);
       if (!n || n < 1) n = 10;
@@ -2670,6 +2658,33 @@
     document.getElementById("jl-batch-cancel").addEventListener("click", function () {
       panel.remove();
     });
+  }
+
+  // 非阻塞检查未完成任务：有则在配置面板里显示「续跑」入口（不再用 confirm 打断）
+  function loadBatchResumeEntry() {
+    getAPI().then(function (API) {
+      return getToken().then(function (token) {
+        if (!token) return null;
+        return fetchWithRetry(API + "/api/analyze/batch", {
+          headers: { "Authorization": "Bearer " + token },
+        }, 2);
+      });
+    }).then(function (resp) {
+      if (!resp) return null;
+      return resp.json();
+    }).then(function (body) {
+      var jobs = (body && body.data && body.data.jobs) || [];
+      var el = document.getElementById("jl-batch-resume");
+      if (el && jobs.length) {
+        el.style.display = "block";
+        el.textContent = "上次有 " + jobs.length + " 个未完成任务，点此续跑";
+        el.addEventListener("click", function () {
+          var panel = document.getElementById("jl-batch-config");
+          if (panel) panel.remove();
+          runBatchJob(jobs[0]);
+        });
+      }
+    }).catch(function () {});
   }
 
   // 弹窗入口：目录页直接弹配置面板；否则推导目录页跳转
