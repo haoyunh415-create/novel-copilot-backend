@@ -2589,7 +2589,8 @@
     for (var i = 0; i < links.length; i++) {
       var a = links[i];
       var title = globalThis.JLBatchParser.cleanTitle(a.textContent || a.getAttribute("title"));
-      if (globalThis.JLBatchParser.isChapterTitle(title)) chapterLike++;
+      var href = a.getAttribute("href");
+      if (globalThis.JLBatchParser.isChapterTitle(title) || globalThis.JLBatchParser.looksLikeChapterHref(href)) chapterLike++;
       if (chapterLike >= 5) return true;
     }
     return false;
@@ -2807,6 +2808,7 @@
     if (!document.getElementById("jl-floating-btn")) {
       injectFloatingButton();
     }
+    if (detectCatalogPage()) { showBatchButton(); }
   }, 1500);
 
   chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {

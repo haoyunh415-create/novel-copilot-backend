@@ -61,9 +61,10 @@ describe("looksLikeChapterHref", () => {
     expect(P.looksLikeChapterHref("//www.qidian.com/chapter/1049996017/915654463/")).toBe(true);
     expect(P.looksLikeChapterHref("/chapter/1049996017/915654463/")).toBe(true);
   });
-  it("matches 3-digit and trailing-slash numeric urls", () => {
+  it("matches 3-digit html urls and rejects bare numeric/book urls", () => {
     expect(P.looksLikeChapterHref("/book/1/101.html")).toBe(true);
-    expect(P.looksLikeChapterHref("/12345/")).toBe(true);
+    expect(P.looksLikeChapterHref("/12345/")).toBe(false);
+    expect(P.looksLikeChapterHref("/book/1049996017/")).toBe(false);
   });
 });
 

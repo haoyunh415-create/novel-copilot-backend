@@ -16,7 +16,9 @@
 
   function looksLikeChapterHref(href) {
     if (!href) return false;
-    return /\/(\d{3,})(\.html?)?\/?$/i.test(href) || /[?&](?:id|chapterId)=(\d{4,})/i.test(href);
+    return /\/chapter\/\d+\/\d+/i.test(href)
+      || /\/(\d{3,})\.html?\/?$/i.test(href)
+      || /[?&](?:id|chapterId|item_id)=(\d{4,})/i.test(href);
   }
 
   function cnToInt(s) {
@@ -63,7 +65,7 @@
       if (!href) return;
       var title = cleanTitle(a.textContent || a.getAttribute("title"));
       if (!title || title.length < 1 || title.length > 120) return;
-      if (!isChapterTitle(title)) return;
+      if (!isChapterTitle(title) && !looksLikeChapterHref(href)) return;
       var abs = absoluteUrl(doc, href);
       if (!abs) return;
       if (seen.has(abs)) return;
