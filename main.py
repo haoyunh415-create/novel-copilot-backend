@@ -456,6 +456,11 @@ class BatchCreateRequest(BaseModel):
     spoiler_free: bool = True
 
 
+class BatchSubmitRequest(BaseModel):
+    item_id: int
+    text: str = Field(min_length=20, max_length=60000)
+
+
 class GuestAnalyzeRequest(BaseModel):
     guest_id: str = Field(min_length=8, max_length=128)
     text: str = Field(min_length=20, max_length=60000)
@@ -1253,6 +1258,94 @@ def batch_create(req: BatchCreateRequest, user=Depends(get_user)):
         )
 
     return ok({"job_id": job_id, "total": total, "pending": pending, "skipped": skipped})
+
+
+def _recount_job(conn, job_id):
+    done = conn.execute(
+        "SELECT COUNT(*) FROM batch_items WHERE job_id=? AND status IN ('done','skipped')", (job_id,)
+    ).fetchone()[0]
+    failed = conn.execute(
+        "SELECT COUNT(*) FROM batch_items WHERE job_id=? AND status='failed'", (job_id,)
+    ).fetchone()[0]
+    pending = conn.execute(
+        "SELECT COUNT(*) FROM batch_items WHERE job_id=? AND status IN ('pending','analyzing')", (job_id,)
+    ).fetchone()[0]
+    if pending == 0:
+        conn.execute(
+            "UPDATE batch_jobs SET done=?, failed=?, status='done' WHERE id=?", (done, failed, job_id)
+        )
+    else:
+        conn.execute(
+            "UPDATE batch_jobs SET done=?, failed=? WHERE id=?", (done, failed, job_id)
+        )
+
+
+@app.post("/api/analyze/batch/{job_id}/submit")
+def batch_submit(job_id: int, req: BatchSubmitRequest, user=Depends(get_user)):
+    with get_db() as conn:
+        job = conn.execute(
+            "SELECT * FROM batch_jobs WHERE id=? AND username=?", (job_id, user)
+        ).fetchone()
+        if not job:
+            return fail("任务不存在")
+        item = conn.execute(
+            "SELECT * FROM batch_items WHERE id=? AND job_id=?", (req.item_id, job_id)
+        ).fetchone()
+        if not item:
+            return fail("章节不存在")
+        if job["status"] == "done":
+            return fail("任务已完成")
+
+    allowed, retry = _check_rate_limit("analyze", user=user)
+    if not allowed:
+        return fail(f"请求太频繁，请 {retry} 秒后再试")
+    now = time.time()
+    last = user_last_request.get(user, 0)
+    if now - last < 2:
+        return fail("请求太频繁了，请稍后再试")
+    user_last_request[user] = now
+    _cleanup_user_last_request()
+
+    with get_db() as conn:
+        conn.execute("UPDATE batch_jobs SET status='running' WHERE id=?", (job_id,))
+
+    if _looks_garbled(req.text):
+        with get_db() as conn:
+            conn.execute("UPDATE batch_items SET status='failed', error=? WHERE id=?", ("正文乱码", req.item_id))
+            _recount_job(conn, job_id)
+        return fail("本章正文疑似乱码，已跳过")
+
+    try:
+        data = _analyze_one(
+            user,
+            text=req.text,
+            chapter_title=item["chapter_title"],
+            source_url=item["source_url"],
+            detail_level=job["detail_level"],
+            spoiler_free=bool(job["spoiler_free"]),
+            book_id=job["book_id"],
+            chapter_index=item["chapter_index"],
+        )
+    except _InsufficientCredits as e:
+        with get_db() as conn:
+            conn.execute("UPDATE batch_items SET status='failed', error=? WHERE id=?", ("额度不足", req.item_id))
+            conn.execute("UPDATE batch_jobs SET status='paused' WHERE id=?", (job_id,))
+            _recount_job(conn, job_id)
+        return fail(e.msg)
+    except _AnalysisRejected as e:
+        with get_db() as conn:
+            conn.execute("UPDATE batch_items SET status='failed', error=? WHERE id=?", (e.msg, req.item_id))
+            _recount_job(conn, job_id)
+        return fail(e.msg)
+
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE batch_items SET status='done', text_hash=?, error='' WHERE id=?",
+            (text_hash(req.text), req.item_id),
+        )
+        _recount_job(conn, job_id)
+
+    return ok({"item_id": req.item_id, "result": data})
 
 
 @app.post("/api/analyze/stream")
