@@ -461,6 +461,10 @@ class BatchSubmitRequest(BaseModel):
     text: str = Field(min_length=20, max_length=60000)
 
 
+class BatchSkipRequest(BaseModel):
+    item_id: int
+
+
 class GuestAnalyzeRequest(BaseModel):
     guest_id: str = Field(min_length=8, max_length=128)
     text: str = Field(min_length=20, max_length=60000)
@@ -1346,6 +1350,31 @@ def batch_submit(job_id: int, req: BatchSubmitRequest, user=Depends(get_user)):
         _recount_job(conn, job_id)
 
     return ok({"item_id": req.item_id, "result": data})
+
+
+@app.post("/api/analyze/batch/{job_id}/skip")
+def batch_skip(job_id: int, req: BatchSkipRequest, user=Depends(get_user)):
+    """批量分析中跳过付费/会员章节：不扣额度，标记 skipped 并计入完成。"""
+    with get_db() as conn:
+        job = conn.execute(
+            "SELECT * FROM batch_jobs WHERE id=? AND username=?", (job_id, user)
+        ).fetchone()
+        if not job:
+            return fail("任务不存在")
+        item = conn.execute(
+            "SELECT * FROM batch_items WHERE id=? AND job_id=?", (req.item_id, job_id)
+        ).fetchone()
+        if not item:
+            return fail("章节不存在")
+        if job["status"] == "done":
+            return fail("任务已完成")
+        conn.execute("UPDATE batch_jobs SET status='running' WHERE id=?", (job_id,))
+        conn.execute(
+            "UPDATE batch_items SET status='skipped', error='付费章节已跳过' WHERE id=?",
+            (req.item_id,),
+        )
+        _recount_job(conn, job_id)
+    return ok({"item_id": req.item_id, "status": "skipped"})
 
 
 @app.get("/api/analyze/batch/{job_id}")

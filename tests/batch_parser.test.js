@@ -84,3 +84,49 @@ describe("parseCatalog filters non-chapter links", () => {
     expect(list[0].source_url).toContain("915654463");
   });
 });
+
+describe("extractIndex qidian chapter-id fallback", () => {
+  it("parses /chapter/{book}/{chap}/ href as index when title has no number", () => {
+    expect(P.extractIndex("某章标题", "https://www.qidian.com/chapter/1049996017/915654463/")).toBe(915654463);
+    expect(P.extractIndex("序章", "/chapter/1049996017/915654463/")).toBe(915654463);
+  });
+  it("title number still wins over href", () => {
+    expect(P.extractIndex("第65章 大结局", "/chapter/1049996017/915654463/")).toBe(65);
+  });
+});
+
+describe("isPaywall", () => {
+  it("detects lock-screen markers", () => {
+    expect(P.isPaywall('<div>本章为付费章节，请订阅后阅读</div>')).toBe(true);
+    expect(P.isPaywall('<div>开通VIP即可继续阅读</div>')).toBe(true);
+    expect(P.isPaywall('<div>剩余章节需付费，成为会员</div>')).toBe(true);
+  });
+  it("rejects normal chapter body and empty", () => {
+    expect(P.isPaywall('<div id="content"><p>第一章 正文内容很长很长</p></div>')).toBe(false);
+    expect(P.isPaywall("")).toBe(false);
+    expect(P.isPaywall(null)).toBe(false);
+  });
+});
+
+describe("selectLatest", () => {
+  const ch = (title, idx) => ({ chapter_title: title, chapter_index: idx, source_url: "u" + idx });
+  it("takes last N when all indices numeric (ascending DOM)", () => {
+    const list = [ch("第一章", 1), ch("第二章", 2), ch("第三章", 3), ch("第四章", 4), ch("第五章", 5)];
+    const out = P.selectLatest(list, 2);
+    expect(out.map((c) => c.chapter_index)).toEqual([4, 5]);
+  });
+  it("sorts before taking last N (reversed catalog)", () => {
+    const list = [ch("第五章", 5), ch("第四章", 4), ch("第三章", 3), ch("第二章", 2), ch("第一章", 1)];
+    const out = P.selectLatest(list, 2);
+    expect(out.map((c) => c.chapter_index)).toEqual([4, 5]);
+  });
+  it("falls back to DOM order when any index is null", () => {
+    const list = [ch("甲", null), ch("乙", 2), ch("丙", 3)];
+    const out = P.selectLatest(list, 2);
+    expect(out.map((c) => c.chapter_title)).toEqual(["乙", "丙"]);
+  });
+  it("clamps n to list length", () => {
+    const list = [ch("第一章", 1), ch("第二章", 2)];
+    expect(P.selectLatest(list, 99)).toHaveLength(2);
+  });
+});

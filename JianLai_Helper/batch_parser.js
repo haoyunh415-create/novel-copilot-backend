@@ -21,6 +21,12 @@
       || /[?&](?:id|chapterId|item_id)=(\d{4,})/i.test(href);
   }
 
+  // 付费/会员章节的锁定页特征（正文抓取为空时再结合判定，避免误跳可读章节）
+  function isPaywall(html) {
+    if (!html) return false;
+    return /(本章为付费|付费章节|付费内容|会员专享|订阅后|订阅本章|订阅解锁|请先订阅|开通VIP|开通会员|购买本章|VIP章节|VIP用户|剩余章节|需付费|充值阅读|阅读券|阅币)/i.test(html);
+  }
+
   function cnToInt(s) {
     if (!s) return null;
     if (/^\d+$/.test(s)) return parseInt(s, 10);
@@ -46,6 +52,9 @@
     if (m2) return parseInt(m2[1], 10);
     var m3 = href.match(/\/(\d{4,})\.html?/i);
     if (m3) return parseInt(m3[1], 10);
+    // 起点 /chapter/{book}/{chap}/ 末尾章节 id（单调递增，可作排序键）
+    var m4 = href.match(/\/chapter\/\d+\/(\d+)/i);
+    if (m4) return parseInt(m4[1], 10);
     return null;
   }
 
@@ -73,6 +82,19 @@
       out.push({ chapter_title: title, chapter_index: extractIndex(title, href), source_url: abs });
     });
     return out;
+  }
+
+  // 取「最新 N 章」：全为数字序号时升序排序再取末尾（兼容目录倒序站点）；
+  // 任一序号缺失则信任 DOM 顺序（默认目录按阅读顺序正序排列）。
+  function selectLatest(list, n) {
+    if (!list || !list.length) return [];
+    var arr = list.slice();
+    var allNumeric = arr.every(function (c) { return typeof c.chapter_index === "number"; });
+    if (allNumeric && arr.length > 1) {
+      arr.sort(function (a, b) { return a.chapter_index - b.chapter_index; });
+    }
+    var count = Math.max(1, Math.min(n || 1, arr.length));
+    return arr.slice(arr.length - count);
   }
 
   function extractChapterText(html, site) {
@@ -104,11 +126,13 @@
   globalThis.JLBatchParser = {
     parseHtml: parseHtml,
     parseCatalog: parseCatalog,
+    selectLatest: selectLatest,
     extractChapterText: extractChapterText,
     extractIndex: extractIndex,
     cnToInt: cnToInt,
     cleanTitle: cleanTitle,
     isChapterTitle: isChapterTitle,
     looksLikeChapterHref: looksLikeChapterHref,
+    isPaywall: isPaywall,
   };
 })();

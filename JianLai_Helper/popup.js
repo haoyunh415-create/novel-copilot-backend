@@ -18,6 +18,7 @@ function setAPI(url) {
 
 document.addEventListener("DOMContentLoaded", () => {
   $("start").addEventListener("click", startAnalyze);
+  $("batch").addEventListener("click", startBatch);
   $("logout").addEventListener("click", logout);
   $("save-api").addEventListener("click", saveApiUrl);
   $("toggle-advanced").addEventListener("click", function () {
@@ -443,6 +444,44 @@ async function startAnalyze() {
               showMessage("已打开章节助手");
               isStarting = false;
               setLoading("start", false);
+            });
+          }, 400);
+        }
+      );
+    });
+  });
+}
+
+async function startBatch() {
+  showMessage("正在打开批量分析…");
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs[0];
+    if (!tab?.id) {
+      showMessage("没有找到当前标签页");
+      return;
+    }
+    chrome.tabs.sendMessage(tab.id, { action: "START_BATCH" }, (response) => {
+      const error = chrome.runtime.lastError;
+      if (response?.ok || !error) {
+        showMessage("已打开批量分析，请在目录页选择章节数");
+        setTimeout(() => window.close(), 600);
+        return;
+      }
+      chrome.scripting.executeScript(
+        {
+          target: { tabId: tab.id },
+          files: ["vis-network.min.js", "batch_parser.js", "content.js"]
+        },
+        () => {
+          const injectError = chrome.runtime.lastError;
+          if (injectError) {
+            showMessage("请在浏览器打开的网页上使用（不是系统页面）");
+            return;
+          }
+          setTimeout(() => {
+            chrome.tabs.sendMessage(tab.id, { action: "START_BATCH" }, () => {
+              showMessage("已打开批量分析");
+              setTimeout(() => window.close(), 600);
             });
           }, 400);
         }

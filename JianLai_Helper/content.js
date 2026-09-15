@@ -2605,21 +2605,22 @@
       "position:fixed;right:20px;bottom:120px;z-index:2147483646;padding:10px 16px;" +
       "background:#E65100;color:#fff;border:none;border-radius:24px;font-size:14px;cursor:pointer;" +
       "box-shadow:0 4px 16px rgba(230,81,0,.35);";
-    btn.addEventListener("click", function () { runBatchFromCatalog(); });
+    btn.addEventListener("click", function () { showBatchConfigPanel(); });
     document.body.appendChild(btn);
   }
 
-  async function runBatchFromCatalog() {
+  async function runBatchFromCatalog(n) {
     var btn = document.getElementById("jl-batch-btn");
     if (btn) { btn.disabled = true; btn.textContent = "⏳ 解析中…"; }
     var html = document.documentElement.outerHTML;
     // site 形参暂未参与解析（batch_parser.parseCatalog 的 site 留待站点特化）
-    var list = globalThis.JLBatchParser.parseCatalog(html, "biquge");
-    if (!list.length) {
+    var all = globalThis.JLBatchParser.parseCatalog(html, "biquge");
+    if (!all.length) {
       alert("未在目录页解析到章节列表");
       if (btn) { btn.disabled = false; btn.textContent = "📚 批量分析"; }
       return;
     }
+    var list = globalThis.JLBatchParser.selectLatest(all, n || 10);
     var API = await getAPI();
     var token = await getToken();
     var listResp = await fetchWithRetry(API + "/api/analyze/batch", {
@@ -2637,6 +2638,87 @@
     var job = await startBatchJob(list);
     if (btn) { btn.disabled = false; btn.textContent = "📚 批量分析"; }
     if (job) runBatchJob(job);
+  }
+
+  // ── 批量配置面板：选择「最新 N 章」 ──
+  function showBatchConfigPanel() {
+    if (document.getElementById("jl-batch-config")) return;
+    var saved = parseInt(localStorage.getItem("JL_Batch_Count") || "10", 10);
+    if (!saved || saved < 1) saved = 10;
+    var panel = document.createElement("div");
+    panel.id = "jl-batch-config";
+    panel.style.cssText =
+      "position:fixed;right:20px;bottom:170px;z-index:2147483646;width:264px;background:#fffef9;" +
+      "border-radius:12px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.28);font-size:13px;color:#333;";
+    panel.innerHTML =
+      '<div style="font-weight:600;margin-bottom:10px">📚 批量分析</div>' +
+      '<div style="margin-bottom:8px;color:#666;font-size:12px;line-height:1.5">分析最新几章？<br>付费/会员章节会自动跳过、不扣额度</div>' +
+      '<input id="jl-batch-count" type="number" min="1" max="500" value="' + saved + '" ' +
+      'style="width:100%;padding:8px;border:1.5px solid #DDD0C4;border-radius:8px;margin-bottom:12px;font-size:14px">' +
+      '<div style="display:flex;gap:8px">' +
+      '<button id="jl-batch-start" style="flex:1;padding:9px;background:#E65100;color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer">开始</button>' +
+      '<button id="jl-batch-cancel" style="flex:1;padding:9px;background:#eee;color:#333;border:none;border-radius:8px;font-size:13px;cursor:pointer">取消</button>' +
+      '</div>';
+    document.body.appendChild(panel);
+    document.getElementById("jl-batch-start").addEventListener("click", function () {
+      var n = parseInt(document.getElementById("jl-batch-count").value, 10);
+      if (!n || n < 1) n = 10;
+      try { localStorage.setItem("JL_Batch_Count", String(n)); } catch (_) {}
+      panel.remove();
+      runBatchFromCatalog(n);
+    });
+    document.getElementById("jl-batch-cancel").addEventListener("click", function () {
+      panel.remove();
+    });
+  }
+
+  // 弹窗入口：目录页直接弹配置面板；否则推导目录页跳转
+  function startBatchFlow() {
+    if (detectCatalogPage()) {
+      showBatchConfigPanel();
+      return;
+    }
+    var catalogUrl = guessCatalogUrl();
+    if (catalogUrl) {
+      try { sessionStorage.setItem("jl_auto_batch", "1"); } catch (_) {}
+      location.href = catalogUrl;
+    } else {
+      alert("请先打开小说的目录页（章节列表页），再点批量分析");
+    }
+  }
+
+  function guessCatalogUrl() {
+    var h = location.hostname;
+    var path = location.pathname;
+    var m;
+    if (/qidian\.com/i.test(h)) {
+      m = path.match(/\/chapter\/(\d+)/) || path.match(/\/book\/(\d+)/);
+      if (m) return "https://www.qidian.com/book/" + m[1] + "/";
+      return null;
+    }
+    // 其它站点：在页面里找「目录 / 章节列表」入口
+    var links = document.querySelectorAll("a[href]");
+    for (var i = 0; i < links.length; i++) {
+      var t = (links[i].textContent || "").trim();
+      if (/(目录|章节列表|章节目录|全部章节)/.test(t) && links[i].href) {
+        return links[i].href;
+      }
+    }
+    return null;
+  }
+
+  // 从章节页跳转到目录页后，自动弹出配置面板
+  function autoOpenBatchIfFlagged() {
+    var flagged = false;
+    try { flagged = sessionStorage.getItem("jl_auto_batch") === "1"; } catch (_) {}
+    if (!flagged) return;
+    try { sessionStorage.removeItem("jl_auto_batch"); } catch (_) {}
+    if (detectCatalogPage()) { showBatchConfigPanel(); }
+    else {
+      [1000, 3000, 6000].forEach(function (ms) {
+        setTimeout(function () { if (detectCatalogPage()) showBatchConfigPanel(); }, ms);
+      });
+    }
   }
 
   async function startBatchJob(list) {
@@ -2679,7 +2761,7 @@
     var html = await r.text();
     var text = globalThis.JLBatchParser.extractChapterText(html, site);
     if (site === "fanqie") text = decodeFanqieText(text);
-    return text;
+    return { text: text, paywall: globalThis.JLBatchParser.isPaywall(html) };
   }
 
   function fetchChapterViaIframe(source_url) {
@@ -2689,20 +2771,22 @@
       iframe.src = source_url;
       document.body.appendChild(iframe);
       var finished = false;
-      function done(text) {
+      function done(text, paywall) {
         if (finished) return;
         finished = true;
         try { iframe.remove(); } catch (_) {}
-        resolve(text || "");
+        resolve({ text: text || "", paywall: !!paywall });
       }
       iframe.addEventListener("load", function () {
         try {
           var doc = iframe.contentDocument;
-          var text = doc ? globalThis.JLBatchParser.extractChapterText(doc.documentElement.outerHTML, "qidian") : "";
-          done(text);
-        } catch (_) { done(""); }
+          if (!doc) { done("", false); return; }
+          var html = doc.documentElement.outerHTML;
+          var text = globalThis.JLBatchParser.extractChapterText(html, "qidian");
+          done(text, globalThis.JLBatchParser.isPaywall(html));
+        } catch (_) { done("", false); }
       });
-      setTimeout(function () { done(""); }, 15000);
+      setTimeout(function () { done("", false); }, 15000);
     });
   }
 
@@ -2756,12 +2840,33 @@
 
     for (var item of pending) {
       if (__jlBatchPaused) { updateBatchPanel(done, jobData.total, "已暂停（可点击「批量分析」续跑）"); return; }
-      var text = "";
+      var fetched = null;
       try {
-        text = await fetchChapterText(item.source_url);
-        if (!text || text.length < 80) throw new Error("正文抓取为空");
+        fetched = await fetchChapterText(item.source_url);
       } catch (e) {
         updateBatchPanel(done, jobData.total, "抓取失败：" + item.chapter_title);
+        continue;
+      }
+      var text = fetched && fetched.text ? fetched.text : "";
+      var isLocked = !!(fetched && fetched.paywall);
+      if (isLocked || !text || text.length < 80) {
+        if (isLocked) {
+          // 付费/会员章节：跳过不扣费
+          var skipResp = await fetchWithRetry(API + "/api/analyze/batch/" + jobId + "/skip", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+            body: JSON.stringify({ item_id: item.id }),
+          }, 2);
+          var skipBody = await skipResp.json();
+          if (skipBody.success) {
+            done++;
+            updateBatchPanel(done, jobData.total, "已跳过付费章节：" + item.chapter_title);
+          } else {
+            updateBatchPanel(done, jobData.total, "跳过失败：" + item.chapter_title);
+          }
+        } else {
+          updateBatchPanel(done, jobData.total, "抓取失败：" + item.chapter_title);
+        }
         continue;
       }
       var submitResp = await fetchWithRetry(API + "/api/analyze/batch/" + jobId + "/submit", {
@@ -2797,6 +2902,8 @@
 
   // 目录页显示「批量分析」入口（仅当检测到章节链接列表）
   if (detectCatalogPage()) { showBatchButton(); }
+  // 从章节页跳转而来：自动弹出批量配置面板
+  autoOpenBatchIfFlagged();
   // 起点等站点目录章节列表常为异步加载，延迟重试几次以补挂按钮
   [1000, 3000, 6000].forEach(function (ms) {
     setTimeout(function () { if (detectCatalogPage()) { showBatchButton(); } }, ms);
@@ -2812,6 +2919,11 @@
   }, 1500);
 
   chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {
+    if (req.action === "START_BATCH") {
+      startBatchFlow();
+      sendResponse({ ok: true });
+      return;
+    }
     if (req.action !== "START_ANALYZE") return;
     const win = createWindow();
     win.querySelector("#jl-heading").textContent = getChapterTitle();
