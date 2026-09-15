@@ -2670,11 +2670,38 @@
 
   async function fetchChapterText(source_url) {
     var site = detectSite();
+    if (site === "qidian") {
+      return fetchChapterViaIframe(source_url);
+    }
     var r = await fetchWithRetry(source_url, { credentials: "include" }, 2);
     var html = await r.text();
     var text = globalThis.JLBatchParser.extractChapterText(html, site);
     if (site === "fanqie") text = decodeFanqieText(text);
     return text;
+  }
+
+  function fetchChapterViaIframe(source_url) {
+    return new Promise(function (resolve) {
+      var iframe = document.createElement("iframe");
+      iframe.style.cssText = "position:absolute;left:-9999px;width:900px;height:900px;";
+      iframe.src = source_url;
+      document.body.appendChild(iframe);
+      var finished = false;
+      function done(text) {
+        if (finished) return;
+        finished = true;
+        try { iframe.remove(); } catch (_) {}
+        resolve(text || "");
+      }
+      iframe.addEventListener("load", function () {
+        try {
+          var doc = iframe.contentDocument;
+          var text = doc ? globalThis.JLBatchParser.extractChapterText(doc.documentElement.outerHTML, "qidian") : "";
+          done(text);
+        } catch (_) { done(""); }
+      });
+      setTimeout(function () { done(""); }, 15000);
+    });
   }
 
   var __jlBatchPaused = false;
