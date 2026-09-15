@@ -11,7 +11,7 @@ import time
 from contextlib import contextmanager
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import Optional
+from typing import Optional, List
 
 import jwt
 import requests as http_requests
@@ -440,6 +440,20 @@ class AnalyzeRequest(BaseModel):
     book_title: Optional[str] = Field(default=None, max_length=200)
     author: Optional[str] = Field(default=None, max_length=200)
     chapter_index: Optional[int] = Field(default=None)
+
+
+class BatchChapterItem(BaseModel):
+    chapter_title: str = Field(min_length=1, max_length=120)
+    chapter_index: Optional[int] = Field(default=None)
+    source_url: Optional[str] = Field(default=None, max_length=1000)
+
+
+class BatchCreateRequest(BaseModel):
+    book_title: Optional[str] = Field(default=None, max_length=200)
+    author: Optional[str] = Field(default=None, max_length=200)
+    chapter_list: List[BatchChapterItem] = Field(min_length=1, max_length=3000)
+    detail_level: str = Field(default="standard", pattern="^(brief|standard|detailed)$")
+    spoiler_free: bool = True
 
 
 class GuestAnalyzeRequest(BaseModel):
@@ -1186,6 +1200,59 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
         return fail(e.msg)
     except _AnalysisRejected as e:
         return fail(e.msg)
+
+
+@app.post("/api/analyze/batch/create")
+def batch_create(req: BatchCreateRequest, user=Depends(get_user)):
+    first = req.chapter_list[0] if req.chapter_list else None
+    book_id = _resolve_book_id(
+        user, req.book_title, req.author,
+        first.source_url if first else None,
+        first.chapter_title if first else "批量分析",
+    )
+    book_title = req.book_title or (first.chapter_title if first else "批量分析")
+
+    with get_db() as conn:
+        analyzed_indexes = {
+            r["chapter_index"]
+            for r in conn.execute("SELECT chapter_index FROM analyses WHERE book_id=?", (book_id,)).fetchall()
+            if r["chapter_index"] is not None
+        }
+        analyzed_urls = {
+            r["source_url"]
+            for r in conn.execute("SELECT source_url FROM analyses WHERE book_id=?", (book_id,)).fetchall()
+            if r["source_url"]
+        }
+
+    total = len(req.chapter_list)
+    skipped = 0
+    pending = 0
+    now = int(time.time())
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO batch_jobs (username, book_id, book_title, total, status, detail_level, spoiler_free, created_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)",
+            (user, book_id, book_title, total, req.detail_level, 1 if req.spoiler_free else 0, now),
+        )
+        job_id = cur.lastrowid
+        for ch in req.chapter_list:
+            is_done = (ch.chapter_index is not None and ch.chapter_index in analyzed_indexes) or (
+                ch.source_url and ch.source_url in analyzed_urls
+            )
+            status = "skipped" if is_done else "pending"
+            if is_done:
+                skipped += 1
+            else:
+                pending += 1
+            conn.execute(
+                "INSERT INTO batch_items (job_id, chapter_title, chapter_index, source_url, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (job_id, ch.chapter_title, ch.chapter_index, ch.source_url, status, now),
+            )
+        conn.execute(
+            "UPDATE batch_jobs SET total=?, done=?, status=? WHERE id=?",
+            (total, skipped, "done" if pending == 0 else "pending", job_id),
+        )
+
+    return ok({"job_id": job_id, "total": total, "pending": pending, "skipped": skipped})
 
 
 @app.post("/api/analyze/stream")
