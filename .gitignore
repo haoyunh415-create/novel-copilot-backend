@@ -35,3 +35,6 @@ jianlai-helper-v2.2.1.zip
 # Claude 内部文件
 .superpowers/
 .ruff_cache/
+
+# Node
+node_modules/

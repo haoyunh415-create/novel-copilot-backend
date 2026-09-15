@@ -47,7 +47,7 @@
         "https://*.biqugex.com/*",
         "https://*.bxwx.io/*"
       ],
-      "js": ["vis-network.min.js", "content.js"],
+      "js": ["vis-network.min.js", "batch_parser.js", "content.js"],
       "run_at": "document_idle"
     }
   ]
