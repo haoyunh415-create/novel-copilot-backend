@@ -1348,6 +1348,31 @@ def batch_submit(job_id: int, req: BatchSubmitRequest, user=Depends(get_user)):
     return ok({"item_id": req.item_id, "result": data})
 
 
+@app.get("/api/analyze/batch/{job_id}")
+def batch_get(job_id: int, user=Depends(get_user)):
+    with get_db() as conn:
+        job = conn.execute(
+            "SELECT * FROM batch_jobs WHERE id=? AND username=?", (job_id, user)
+        ).fetchone()
+        if not job:
+            return fail("任务不存在")
+        items = conn.execute(
+            "SELECT id, chapter_title, chapter_index, source_url, status, error FROM batch_items WHERE job_id=? ORDER BY id",
+            (job_id,),
+        ).fetchall()
+    return ok({"job": dict(job), "items": [dict(i) for i in items]})
+
+
+@app.get("/api/analyze/batch")
+def batch_list(user=Depends(get_user)):
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM batch_jobs WHERE username=? AND status IN ('pending','running','paused') ORDER BY id DESC",
+            (user,),
+        ).fetchall()
+    return ok({"jobs": [dict(r) for r in rows]})
+
+
 @app.post("/api/analyze/stream")
 async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
     """流式分析章节（SSE）：实时推送 AI 分析进度和结果"""
