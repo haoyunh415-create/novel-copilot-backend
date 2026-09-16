@@ -47,6 +47,9 @@ def friendly_error(exc: Exception) -> str:
     if "500" in msg or "502" in msg or "503" in msg:
         return "AI 服务暂时不可用，请稍后重试"
 
+    if "安全过滤" in msg or "敏感内容" in msg:
+        return "本章内容疑似触发 AI 安全过滤，建议稍后重试、或切换「简洁」模式再试"
+
     if "返回内容异常" in msg:
         return "AI 本次返回内容异常，请重试本章或稍后再试"
 

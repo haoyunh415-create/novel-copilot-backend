@@ -297,6 +297,8 @@ JSON 结构：
             # 终极兜底：把 AI 返回的原始文本转为纯文本摘要（先剥离 JSON 结构符，避免把原始 JSON 直接展示给用户）
             plain = _raw_to_plain_text(raw)
             if plain == "AI 返回内容异常，请稍后重试":
+                import logging
+                logging.warning("analyze_text: empty/unparseable content for %s, raw=%r", chapter_title[:30], str(raw)[:200])
                 raise RuntimeError("AI 返回内容异常，请稍后重试")
             return _normalize_result({"summary": plain}, raw, degraded=True)
 
@@ -305,13 +307,26 @@ JSON 结构：
     try:
         return _parse_once(text, max_tok=4096, temp=0.2)
     except RuntimeError as first_err:
-        # AI 偶发返回空/不可解析内容（安全过滤或截断），用更短文本 + 稍高温度重试一次
+        # AI 偶发返回空/不可解析内容（安全过滤或截断）
         if "返回内容异常" not in str(first_err):
             raise
         short_text = text[:4000]
-        if len(short_text) < 500:
-            raise
-        return _parse_once(short_text, max_tok=3072, temp=0.4)
+        # 第二次：更短文本 + 稍高温度重试
+        if len(short_text) >= 500:
+            try:
+                return _parse_once(short_text, max_tok=3072, temp=0.4)
+            except RuntimeError as second_err:
+                import logging
+                logging.warning("analyze_text: JSON retry failed for %s: %s", chapter_title[:30], str(second_err)[:200])
+        # 第三次：降级为纯文本摘要（不要求 JSON），规避内容安全过滤对 JSON 输出的影响
+        summary_result = analyze_summary_only(
+            short_text if len(short_text) >= 500 else text,
+            chapter_title, spoiler_free=spoiler_free, detail_level=detail_level,
+        )
+        summary = (summary_result or {}).get("summary", "")
+        if summary:
+            return _normalize_result({"summary": summary}, "", degraded=True)
+        raise first_err
 
 
 def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = True, detail_level: str = "standard"):
