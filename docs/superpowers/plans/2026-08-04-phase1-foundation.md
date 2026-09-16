@@ -148,7 +148,7 @@ def admin_stats(_admin=Depends(verify_admin)):
 - [ ] **Step 2: 验证 API**
 
 ```bash
-curl -s "https://jianla.xyz:8000/api/admin/stats?admin_key=f3295289ffa4ed9e0b770682b192558a" | python -m json.tool
+curl -s "https://jianla.xyz:8000/api/admin/stats?admin_key=你的ADMIN_KEY" | python -m json.tool
 ```
 
 预期：返回 200，所有字段存在。
