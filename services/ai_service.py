@@ -260,7 +260,8 @@ def analyze_text(text: str, chapter_title: str, detail_level: str = "standard", 
     # 截断过长文本（DeepSeek 上下文窗口充足，但过长会变慢）
     text = text[:8000] if len(text) > 8000 else text
 
-    prompt = f"""你是一个专业的长篇小说阅读助手。{spoiler_rule}
+    def _build_prompt(src_text: str) -> str:
+        return f"""你是一个专业的长篇小说阅读助手。{spoiler_rule}
 
 章节标题：{chapter_title}
 
@@ -276,29 +277,41 @@ JSON 结构：
 {{"summary":"...","characters":[{{"name":"","note":""}}],"foreshadowing":[{{"clue":"","reason":"","confidence":70}}],"terms":[{{"term":"","meaning":""}}],"graph":{{"nodes":[{{"id":"n1","label":"","level":"core"}}],"edges":[{{"from":"n1","to":"n2","label":""}}]}}}}
 
 正文：
-{text}"""
+{src_text}"""
 
-    payload, _finish = _call_ai([
-        {"role": "system", "content": "你是一个专业的小说分析助手，只返回符合要求的 JSON，不输出任何其他内容。"},
-        {"role": "user", "content": prompt},
-    ], temperature=0.2, timeout=35, max_tokens=4096)
+    def _parse_once(src_text: str, max_tok: int, temp: float):
+        payload, _finish = _call_ai([
+            {"role": "system", "content": "你是一个专业的小说分析助手，只返回符合要求的 JSON，不输出任何其他内容。"},
+            {"role": "user", "content": _build_prompt(src_text)},
+        ], temperature=temp, timeout=35, max_tokens=max_tok)
+
+        try:
+            raw = payload["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("AI 响应格式异常") from exc
+
+        # 尝试 JSON 解析，失败则降级为纯文本摘要
+        try:
+            parsed = _extract_json(raw)
+        except (ValueError, json.JSONDecodeError):
+            # 终极兜底：把 AI 返回的原始文本转为纯文本摘要（先剥离 JSON 结构符，避免把原始 JSON 直接展示给用户）
+            plain = _raw_to_plain_text(raw)
+            if plain == "AI 返回内容异常，请稍后重试":
+                raise RuntimeError("AI 返回内容异常，请稍后重试")
+            return _normalize_result({"summary": plain}, raw, degraded=True)
+
+        return _normalize_result(parsed, raw)
 
     try:
-        raw = payload["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError("AI 响应格式异常") from exc
-
-    # 尝试 JSON 解析，失败则降级为纯文本摘要
-    try:
-        parsed = _extract_json(raw)
-    except (ValueError, json.JSONDecodeError):
-        # 终极兜底：把 AI 返回的原始文本转为纯文本摘要（先剥离 JSON 结构符，避免把原始 JSON 直接展示给用户）
-        plain = _raw_to_plain_text(raw)
-        if plain == "AI 返回内容异常，请稍后重试":
-            raise RuntimeError("AI 返回内容异常，请稍后重试")
-        return _normalize_result({"summary": plain}, raw, degraded=True)
-
-    return _normalize_result(parsed, raw)
+        return _parse_once(text, max_tok=4096, temp=0.2)
+    except RuntimeError as first_err:
+        # AI 偶发返回空/不可解析内容（安全过滤或截断），用更短文本 + 稍高温度重试一次
+        if "返回内容异常" not in str(first_err):
+            raise
+        short_text = text[:4000]
+        if len(short_text) < 500:
+            raise
+        return _parse_once(short_text, max_tok=3072, temp=0.4)
 
 
 def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = True, detail_level: str = "standard"):

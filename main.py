@@ -32,10 +32,10 @@ def friendly_error(exc: Exception) -> str:
     if "缺少 DEEPSEEK_API_KEY" in msg:
         return "服务器 AI 服务未配置，请联系管理员"
 
-    if isinstance(exc, http_requests.Timeout) or "timeout" in msg.lower():
+    if isinstance(exc, http_requests.Timeout) or "timeout" in msg.lower() or "超时" in msg:
         return "AI 服务响应超时，章节内容太长或网络不稳定，请稍后重试"
 
-    if isinstance(exc, http_requests.ConnectionError) or "connection" in msg.lower():
+    if isinstance(exc, http_requests.ConnectionError) or "connection" in msg.lower() or "无法连接" in msg:
         return "无法连接 AI 服务，请检查网络后重试"
 
     if "429" in msg or "rate" in msg.lower():
@@ -46,6 +46,9 @@ def friendly_error(exc: Exception) -> str:
 
     if "500" in msg or "502" in msg or "503" in msg:
         return "AI 服务暂时不可用，请稍后重试"
+
+    if "返回内容异常" in msg:
+        return "AI 本次返回内容异常，请重试本章或稍后再试"
 
     if "没有返回 JSON" in msg or "格式异常" in msg:
         return "AI 返回格式异常，请重试或换个章节试试"
