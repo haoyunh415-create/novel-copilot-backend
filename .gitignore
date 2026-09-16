@@ -28,10 +28,15 @@ Thumbs.db
 # 测试文件
 test_token.txt
 
-# 旧版插件包 (只保留最新)
+# 一次性测量/分析脚本
+estimate_token_savings.py
+measure_real_tokens.py
+
+# 插件包 (构建产物，不入库)
 jianlai-helper-v2.1*.zip
 jianlai-helper-v2.2.0*.zip
 jianlai-helper-v2.2.1.zip
+jianlai-helper-v2.3*.zip
 
 # Claude 内部文件
 .superpowers/
