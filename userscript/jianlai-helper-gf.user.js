@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.14
+// @version      2.3.15
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 15+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -26,6 +26,7 @@
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @grant        GM_xmlhttpRequest
+// @connect      *
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -755,6 +756,7 @@
           '<div class="jl-card"><h3>关键人物</h3><div id="jl-characters"><p class="jl-empty">暂无</p></div></div>' +
           '<div class="jl-card"><h3>名词解释</h3><div id="jl-terms"><p class="jl-empty">暂无</p></div></div>' +
           '<div class="jl-card" id="jl-payoff-card" style="display:none"><h3>🏮 伏笔回收</h3><div id="jl-payoff"></div></div>' +
+          '<button id="jl-clear-batch" class="jl-text-btn">🗑 清空批量历史任务</button>' +
         '</section>' +
         '<section id="jl-panel-clues" class="jl-panel">' +
           '<div class="jl-card"><h3>疑似伏笔</h3><div id="jl-clues"><p class="jl-empty">暂无</p></div></div>' +
@@ -828,6 +830,7 @@
         '</div>' +
         '<div class="jl-actions">' +
           '<button id="jl-run">分析当前章节</button>' +
+          '<button id="jl-batch" style="flex:0 0 auto;background:#6D4C41;color:#fff">📚 批量分析</button>' +
           '<button id="jl-review">最近回顾</button>' +
           '<button id="jl-full-report">全书复盘</button>' +
           '<button id="jl-export">导出</button>' +
@@ -850,6 +853,11 @@
       toggleSidebarMode(win);
     });
     win.querySelector("#jl-run").addEventListener("click", runAnalyze);
+    win.querySelector("#jl-batch").addEventListener("click", startBatchFromWindow);
+    win.querySelector("#jl-clear-batch").addEventListener("click", function () {
+      if (!confirm("确定清空所有批量分析历史任务吗？已生成的分析结果不受影响。")) return;
+      clearBatchTasks().then(function (n) { alert(n > 0 ? "已清空 " + n + " 个历史任务" : "暂无历史任务"); });
+    });
     win.querySelector("#jl-ask").addEventListener("click", askMemory);
     win.querySelector("#jl-suggest-btn").addEventListener("click", fetchSuggestedQuestions);
     win.querySelector("#jl-clear-chat").addEventListener("click", clearChatHistory);
@@ -2793,6 +2801,8 @@
     createLauncher();
     // 章节页显示悬浮入口按钮（一键分析，免去点插件弹窗的步骤）
     injectFloatingButton();
+    // 从章节页跳转到目录页后，自动弹出批量分析
+    autoOpenBatchIfFlagged();
   }
   init();
 
@@ -3039,5 +3049,866 @@
     _origSwitchPanel(panel);
     if (panel === "weekly") renderWeeklyReport();
   };
+
+  // ═══════════ 目录解析 + 章节正文提取（纯函数，浏览器通用）═══════════
+  (function () {
+    "use strict";
+
+    function parseHtml(html) {
+      return new DOMParser().parseFromString(html, "text/html");
+    }
+
+    function cleanTitle(t) {
+      return (t || "").replace(/\s+/g, " ").trim();
+    }
+
+    function isChapterTitle(t) {
+      return /第\s*[0-9一二三四五六七八九十百千万零]+\s*[章节卷回]/.test(t || "");
+    }
+
+    function looksLikeChapterHref(href) {
+      if (!href) return false;
+      return /\/chapter\/\d+\/\d+/i.test(href)
+        || /\/(\d{3,})\.html?\/?$/i.test(href)
+        || /[?&](?:id|chapterId|item_id)=(\d{4,})/i.test(href);
+    }
+
+    // 付费/会员章节的锁定页特征（正文抓取为空时再结合判定，避免误跳可读章节）
+    function isPaywall(html) {
+      if (!html) return false;
+      return /(本章为付费|付费章节|付费内容|会员专享|订阅后|订阅本章|订阅解锁|请先订阅|开通VIP|开通会员|购买本章|VIP章节|VIP用户|剩余章节|需付费|充值阅读|阅读券|阅币)/i.test(html);
+    }
+
+    function cnToInt(s) {
+      if (!s) return null;
+      if (/^\d+$/.test(s)) return parseInt(s, 10);
+      var map = { "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9 };
+      var units = { "十": 10, "百": 100, "千": 1000, "万": 10000 };
+      var total = 0, section = 0, num = 0;
+      for (var i = 0; i < s.length; i++) {
+        var ch = s[i];
+        if (map[ch] !== undefined) { num = map[ch]; }
+        else if (units[ch] !== undefined) {
+          var u = units[ch];
+          if (u === 10000) { section = (section + num) * u; total += section; section = 0; num = 0; }
+          else { section += (num || 1) * u; num = 0; }
+        } else { return null; }
+      }
+      return total + section + num;
+    }
+
+    function extractIndex(title, href) {
+      var m = title.match(/第\s*([0-9一二三四五六七八九十百千万零]+)\s*[章节卷回]/);
+      if (m) return cnToInt(m[1]);
+      var m2 = href.match(/[?&](?:id|chapterId)=(\d+)/i);
+      if (m2) return parseInt(m2[1], 10);
+      var m3 = href.match(/\/(\d{4,})\.html?/i);
+      if (m3) return parseInt(m3[1], 10);
+      var m4 = href.match(/\/chapter\/\d+\/(\d+)/i);
+      if (m4) return parseInt(m4[1], 10);
+      return null;
+    }
+
+    function absoluteUrl(doc, href) {
+      var base = doc.querySelector("base[href]");
+      var baseHref = base ? base.getAttribute("href") : doc.baseURI;
+      try { return new URL(href, baseHref || "http://x/").href; } catch (_) { return null; }
+    }
+
+    function parseCatalog(html, site) {
+      var doc = parseHtml(html);
+      var anchors = Array.from(doc.querySelectorAll("a[href]"));
+      var seen = new Set();
+      var out = [];
+      anchors.forEach(function (a) {
+        var href = a.getAttribute("href");
+        if (!href) return;
+        var title = cleanTitle(a.textContent || a.getAttribute("title"));
+        if (!title || title.length < 1 || title.length > 120) return;
+        if (!isChapterTitle(title) && !looksLikeChapterHref(href)) return;
+        var abs = absoluteUrl(doc, href);
+        if (!abs) return;
+        if (seen.has(abs)) return;
+        seen.add(abs);
+        out.push({ chapter_title: title, chapter_index: extractIndex(title, href), source_url: abs });
+      });
+      return out;
+    }
+
+    // 取「最新 N 章」：全为数字序号时升序排序再取末尾（兼容目录倒序站点）；
+    // 任一序号缺失则信任 DOM 顺序（默认目录按阅读顺序正序排列）。
+    function selectLatest(list, n) {
+      if (!list || !list.length) return [];
+      var arr = list.slice();
+      var allNumeric = arr.every(function (c) { return typeof c.chapter_index === "number"; });
+      if (allNumeric && arr.length > 1) {
+        arr.sort(function (a, b) { return a.chapter_index - b.chapter_index; });
+      }
+      var count = Math.max(1, Math.min(n || 1, arr.length));
+      return arr.slice(arr.length - count);
+    }
+
+    function extractChapterText(html, site) {
+      var doc = parseHtml(html);
+      var selectors = [
+        "#content", "#chaptercontent", "#ChapterContent", "#txt",
+        ".read-content", ".main-text-wrap", ".chapter-content",
+        ".content", ".article-content", ".post-content",
+        ".txt", ".text", ".novel-content", ".book-content",
+        "article", ".entry-content", "#article", "#text",
+      ];
+      var best = "";
+      selectors.forEach(function (sel) {
+        var c = doc.querySelector(sel);
+        if (!c) return;
+        var ps = c.querySelectorAll("p, div");
+        var text = Array.from(ps).map(function (p) { return (p.textContent || "").trim(); }).filter(function (t) { return t.length > 5; }).join("\n");
+        if (text.length > best.length) best = text;
+      });
+      if (best.length < 80) {
+        var all = doc.querySelectorAll("p");
+        var alt = Array.from(all).map(function (p) { return (p.textContent || "").trim(); }).filter(function (t) { return t.length > 8; }).join("\n");
+        if (alt.length > best.length) best = alt;
+      }
+      return best;
+    }
+
+    globalThis.JLBatchParser = {
+      parseHtml: parseHtml,
+      parseCatalog: parseCatalog,
+      selectLatest: selectLatest,
+      extractChapterText: extractChapterText,
+      extractIndex: extractIndex,
+      cnToInt: cnToInt,
+      cleanTitle: cleanTitle,
+      isChapterTitle: isChapterTitle,
+      looksLikeChapterHref: looksLikeChapterHref,
+      isPaywall: isPaywall,
+    };
+  })();
+
+  // ═══════════ 批量分析（目录页） ═══════════
+
+  function detectCatalogPage() {
+    var links = document.querySelectorAll("a[href]");
+    var chapterLike = 0;
+    for (var i = 0; i < links.length; i++) {
+      var a = links[i];
+      var title = globalThis.JLBatchParser.cleanTitle(a.textContent || a.getAttribute("title"));
+      var href = a.getAttribute("href");
+      if (globalThis.JLBatchParser.isChapterTitle(title) || globalThis.JLBatchParser.looksLikeChapterHref(href)) chapterLike++;
+      if (chapterLike >= 5) return true;
+    }
+    return false;
+  }
+
+  function confirmBatchStart(selectedList) {
+    startBatchJob(selectedList).then(function (job) {
+      if (job) runBatchJob(job);
+    });
+  }
+
+  // 注入章节勾选面板样式（幂等）
+  function ensureBatchPickerStyle() {
+    if (document.getElementById("jl-batch-picker-style")) return;
+    var st = document.createElement("style");
+    st.id = "jl-batch-picker-style";
+    st.textContent =
+      "#jl-batch-picker-mask{position:fixed;inset:0;z-index:2147483646;background:rgba(30,20,15,.45);display:flex;align-items:center;justify-content:center;font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;animation:jlFadeIn .2s ease}" +
+      "#jl-batch-picker-mask .jlbp-panel{display:flex;flex-direction:column;width:min(560px,calc(100vw - 32px));height:min(720px,calc(100vh - 32px));background:linear-gradient(180deg,#FBF8F0,#F5EDE0);border:1px solid #D7CCC8;border-radius:14px;box-shadow:0 16px 48px rgba(0,0,0,.3);overflow:hidden}" +
+      "#jl-batch-picker-mask .jlbp-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;color:#fff;background:linear-gradient(135deg,#3E2723,#5D4037,#6D4C41)}" +
+      "#jl-batch-picker-mask .jlbp-title strong{display:block;font-size:16px;font-weight:700;letter-spacing:.5px}" +
+      "#jl-batch-picker-mask .jlbp-title span{display:block;margin-top:4px;font-size:12px;opacity:.75;line-height:1.5}" +
+      "#jl-batch-picker-mask .jlbp-close{width:32px;height:32px;flex:0 0 auto;color:#fff;background:rgba(255,255,255,.14);border:0;border-radius:50%!important;font-size:20px;line-height:1;cursor:pointer}" +
+      "#jl-batch-picker-mask .jlbp-close:hover{background:rgba(255,255,255,.26)}" +
+      "#jl-batch-picker-mask .jlbp-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 16px;background:#EFEBE4;border-bottom:1px solid #E8DDD2}" +
+      "#jl-batch-picker-mask .jlbp-count{font-size:12px;color:#6D4C41}" +
+      "#jl-batch-picker-mask .jlbp-count b{color:#E65100;font-size:14px}" +
+      "#jl-batch-picker-mask .jlbp-actions{display:flex;gap:6px}" +
+      "#jl-batch-picker-mask .jlbp-btn{padding:6px 12px;border:1px solid #D7CCC8;border-radius:8px;background:#FFFDF7;color:#5D4037;font-size:12px;font-weight:500;cursor:pointer;transition:all .15s ease}" +
+      "#jl-batch-picker-mask .jlbp-btn:hover{border-color:#8D6E63;background:#F5EDE0}" +
+      "#jl-batch-picker-mask .jlbp-list{flex:1;min-height:0;overflow-y:auto;padding:8px 12px}" +
+      "#jl-batch-picker-mask .jlbp-list::-webkit-scrollbar{width:6px}" +
+      "#jl-batch-picker-mask .jlbp-list::-webkit-scrollbar-thumb{background:#D7CCC8;border-radius:3px}" +
+      "#jl-batch-picker-mask .jlbp-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .12s ease}" +
+      "#jl-batch-picker-mask .jlbp-item:hover{background:#FFF3E0}" +
+      "#jl-batch-picker-mask .jlbp-check{width:16px;height:16px;flex:0 0 auto;accent-color:#E65100;cursor:pointer}" +
+      "#jl-batch-picker-mask .jlbp-idx{flex:0 0 auto;min-width:52px;padding:2px 8px;border-radius:10px;background:#EFEBE4;color:#8D6E63;font-size:11px;text-align:center}" +
+      "#jl-batch-picker-mask .jlbp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#3E2723;font-size:13px}" +
+      "#jl-batch-picker-mask .jlbp-footer{display:flex;gap:10px;padding:12px 16px;border-top:1px solid #E8DDD2;background:#F5EDE0}" +
+      "#jl-batch-picker-mask .jlbp-cancel{flex:0 0 auto}" +
+      "#jl-batch-picker-mask .jlbp-start{flex:1;color:#fff;background:linear-gradient(135deg,#E65100,#F57C00);border:0;font-weight:600;box-shadow:0 2px 8px rgba(230,81,0,.25)}" +
+      "#jl-batch-picker-mask .jlbp-start:hover{box-shadow:0 4px 14px rgba(230,81,0,.35)}" +
+      "#jl-batch-picker-mask .jlbp-start:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}";
+    document.documentElement.appendChild(st);
+  }
+
+  // 弹出章节勾选面板：解析目录 → 排序 → 默认勾选最新 N 章 → 用户勾选 → 确认后建任务
+  function showBatchChapterPicker(all) {
+    var oldMask = document.getElementById("jl-batch-picker-mask");
+    if (oldMask) oldMask.remove();
+
+    var sorted = all.slice();
+    var allNumeric = sorted.every(function (c) { return typeof c.chapter_index === "number"; });
+    if (allNumeric && sorted.length > 1) {
+      sorted.sort(function (a, b) { return a.chapter_index - b.chapter_index; });
+    }
+
+    var savedN = parseInt(localStorage.getItem("JL_Batch_Count") || "10", 10);
+    if (!savedN || savedN < 1) savedN = 10;
+    var defaultCount = Math.max(1, Math.min(savedN, sorted.length));
+    var defaultSet = {};
+    for (var i = sorted.length - defaultCount; i < sorted.length; i++) {
+      defaultSet[sorted[i].source_url] = true;
+    }
+
+    ensureBatchPickerStyle();
+
+    var mask = document.createElement("div");
+    mask.id = "jl-batch-picker-mask";
+    mask.innerHTML =
+      '<div class="jlbp-panel">' +
+        '<div class="jlbp-header">' +
+          '<div class="jlbp-title"><strong>📚 批量分析 · 选择章节</strong><span>勾选要分析的章节；付费/会员章节自动跳过，不扣额度</span></div>' +
+          '<button class="jlbp-close" title="关闭">×</button>' +
+        '</div>' +
+        '<div class="jlbp-toolbar">' +
+          '<span class="jlbp-count">已选 <b id="jlbp-count">0</b> / ' + sorted.length + ' 章</span>' +
+          '<div class="jlbp-actions">' +
+            '<button class="jlbp-btn" data-act="all">全选</button>' +
+            '<button class="jlbp-btn" data-act="none">全不选</button>' +
+            '<button class="jlbp-btn" data-act="latest">选最新 ' + savedN + ' 章</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="jlbp-list" id="jlbp-list"></div>' +
+        '<div class="jlbp-footer">' +
+          '<button class="jlbp-btn jlbp-cancel">取消</button>' +
+          '<button class="jlbp-btn jlbp-start">开始分析 <b id="jlbp-start-n">0</b> 章</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(mask);
+
+    var urlToChapter = {};
+    sorted.forEach(function (c) { urlToChapter[c.source_url] = c; });
+
+    var listEl = mask.querySelector("#jlbp-list");
+    sorted.slice().reverse().forEach(function (c) {
+      var checked = defaultSet[c.source_url] ? "checked" : "";
+      var idxLabel = (typeof c.chapter_index === "number") ? ("第 " + c.chapter_index + " 章") : "";
+      var label = document.createElement("label");
+      label.className = "jlbp-item";
+      label.innerHTML =
+        '<input type="checkbox" class="jlbp-check" data-url="' + escHtml(c.source_url) + '" ' + checked + '>' +
+        '<span class="jlbp-idx">' + escHtml(idxLabel) + '</span>' +
+        '<span class="jlbp-name">' + escHtml(c.chapter_title) + '</span>';
+      listEl.appendChild(label);
+    });
+
+    function refreshCount() {
+      var boxes = listEl.querySelectorAll(".jlbp-check");
+      var n = 0;
+      boxes.forEach(function (b) { if (b.checked) n++; });
+      mask.querySelector("#jlbp-count").textContent = String(n);
+      mask.querySelector("#jlbp-start-n").textContent = String(n);
+      mask.querySelector(".jlbp-start").disabled = n === 0;
+    }
+    refreshCount();
+
+    listEl.addEventListener("change", refreshCount);
+
+    mask.querySelector(".jlbp-close").addEventListener("click", function () { mask.remove(); });
+    mask.querySelector(".jlbp-cancel").addEventListener("click", function () { mask.remove(); });
+    mask.querySelectorAll(".jlbp-btn[data-act]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var act = btn.getAttribute("data-act");
+        var boxes = listEl.querySelectorAll(".jlbp-check");
+        if (act === "all") {
+          boxes.forEach(function (b) { b.checked = true; });
+        } else if (act === "none") {
+          boxes.forEach(function (b) { b.checked = false; });
+        } else if (act === "latest") {
+          var n = savedN;
+          boxes.forEach(function (b, i) { b.checked = i < n; });
+        }
+        refreshCount();
+      });
+    });
+
+    mask.querySelector(".jlbp-start").addEventListener("click", function () {
+      var selected = [];
+      listEl.querySelectorAll(".jlbp-check").forEach(function (b) {
+        if (b.checked && urlToChapter[b.dataset.url]) selected.push(urlToChapter[b.dataset.url]);
+      });
+      if (!selected.length) return;
+      try { localStorage.setItem("JL_Batch_Count", String(selected.length)); } catch (_) {}
+      mask.remove();
+      resumeOrStart(selected);
+    });
+  }
+
+  // ── 批量分析入口（主窗口 footer「📚 批量分析」按钮）──
+  function startBatchFromWindow() {
+    if (detectCatalogPage()) {
+      var html = document.documentElement.outerHTML;
+      var all = globalThis.JLBatchParser.parseCatalog(html, detectSite());
+      if (!all.length) {
+        alert("未在目录页解析到章节列表");
+        return;
+      }
+      showBatchChapterPicker(all);
+      return;
+    }
+    var catalogUrl = guessCatalogUrl();
+    if (catalogUrl) {
+      try { sessionStorage.setItem("jl_auto_batch", "1"); } catch (_) {}
+      location.href = catalogUrl;
+    } else {
+      alert("请先打开小说的目录页（章节列表页），再点批量分析");
+    }
+  }
+
+  // 有未完成任务时让用户选择「续跑」或「新建」；否则直接开始
+  function resumeOrStart(selectedList) {
+    getAPI().then(function (API) {
+      return getToken().then(function (token) {
+        if (!token) return null;
+        return fetchWithRetry(API + "/api/analyze/batch", {
+          headers: { "Authorization": "Bearer " + token },
+        }, 2);
+      });
+    }).then(function (resp) {
+      if (!resp) return null;
+      return resp.json();
+    }).then(function (body) {
+      var jobs = (body && body.data && body.data.jobs) || [];
+      if (jobs.length && confirm("检测到 " + jobs.length + " 个未完成批量任务，是否续跑最近一个？（点“取消”则新建任务）")) {
+        runBatchJob(jobs[0]);
+      } else {
+        confirmBatchStart(selectedList);
+      }
+    }).catch(function () {
+      confirmBatchStart(selectedList);
+    });
+  }
+
+  function clearBatchTasks() {
+    return getAPI().then(function (API) {
+      return getToken().then(function (token) {
+        if (!token) return 0;
+        return fetchWithRetry(API + "/api/analyze/batch/clear", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        }, 2).then(function (r) { return r.json(); }).then(function (b) {
+          return (b && b.data && b.data.deleted) || 0;
+        });
+      });
+    }).catch(function () { return 0; });
+  }
+
+  // 弹窗入口：统一走主窗口内的批量分析
+  function startBatchFlow() {
+    startBatchFromWindow();
+  }
+
+  function guessCatalogUrl() {
+    var h = location.hostname;
+    var path = location.pathname;
+    var m;
+    if (/qidian\.com/i.test(h)) {
+      m = path.match(/\/chapter\/(\d+)/) || path.match(/\/book\/(\d+)/);
+      if (m) return "https://www.qidian.com/book/" + m[1] + "/";
+      return null;
+    }
+    var links = document.querySelectorAll("a[href]");
+    for (var i = 0; i < links.length; i++) {
+      var t = (links[i].textContent || "").trim();
+      if (/(目录|章节列表|章节目录|全部章节)/.test(t) && links[i].href) {
+        return links[i].href;
+      }
+    }
+    return null;
+  }
+
+  // 从章节页跳转到目录页后，自动弹出配置面板
+  function autoOpenBatchIfFlagged() {
+    var flagged = false;
+    try { flagged = sessionStorage.getItem("jl_auto_batch") === "1"; } catch (_) {}
+    if (!flagged) return;
+    try { sessionStorage.removeItem("jl_auto_batch"); } catch (_) {}
+    if (detectCatalogPage()) { startBatchFromWindow(); }
+    else {
+      [1000, 3000, 6000].forEach(function (ms) {
+        setTimeout(function () { if (detectCatalogPage()) startBatchFromWindow(); }, ms);
+      });
+    }
+  }
+
+  async function startBatchJob(list) {
+    var API = await getAPI();
+    var token = await getToken();
+    if (!token) { alert("请先登录"); return null; }
+    var resp = await fetchWithRetry(API + "/api/analyze/batch/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+      body: JSON.stringify({
+        book_title: getBookTitle(),
+        author: getAuthor(),
+        chapter_list: list,
+        detail_level: localStorage.getItem("JL_Detail_Level") || "standard",
+        spoiler_free: true,
+      }),
+    }, 2);
+    var data = await resp.json();
+    if (!data.success) { alert(data.error || "创建任务失败"); return null; }
+    var d = data.data;
+    alert("任务已创建：共 " + d.total + " 章，需分析 " + d.pending + " 章，已跳过 " + d.skipped + " 章");
+    return d;
+  }
+
+  // ═══════════ 批量抓取循环 + 进度面板 ═══════════
+
+  function detectSite() {
+    var h = location.hostname;
+    if (/fanqienovel\.com/i.test(h)) return "fanqie";
+    if (/qidian\.com/i.test(h)) return "qidian";
+    return "biquge";
+  }
+
+  async function fetchChapterText(source_url) {
+    var site = detectSite();
+    if (site === "qidian") {
+      return fetchChapterViaIframe(source_url);
+    }
+    // 油猴脚本跨域抓正文：GM_xmlhttpRequest（@connect * 已声明）优先，失败回退 native fetch
+    var html = "";
+    try {
+      html = await fetchChapterViaGM(source_url);
+    } catch (e) {
+      try {
+        var r = await fetchWithRetry(source_url, { credentials: "include" }, 2);
+        html = await r.text();
+      } catch (e2) {
+        throw e2;
+      }
+    }
+    var text = globalThis.JLBatchParser.extractChapterText(html, site);
+    if (site === "fanqie") text = decodeFanqieText(text);
+    return { text: text, paywall: globalThis.JLBatchParser.isPaywall(html) };
+  }
+
+  function fetchChapterViaIframe(source_url) {
+    return new Promise(function (resolve) {
+      var iframe = document.createElement("iframe");
+      iframe.style.cssText = "position:absolute;left:-9999px;width:900px;height:900px;";
+      iframe.src = source_url;
+      document.body.appendChild(iframe);
+      var finished = false;
+      function done(text, paywall) {
+        if (finished) return;
+        finished = true;
+        try { iframe.remove(); } catch (_) {}
+        resolve({ text: text || "", paywall: !!paywall });
+      }
+      iframe.addEventListener("load", function () {
+        try {
+          var doc = iframe.contentDocument;
+          if (!doc) { done("", false); return; }
+          var html = doc.documentElement.outerHTML;
+          var text = globalThis.JLBatchParser.extractChapterText(html, "qidian");
+          done(text, globalThis.JLBatchParser.isPaywall(html));
+        } catch (_) { done("", false); }
+      });
+      setTimeout(function () { done("", false); }, 15000);
+    });
+  }
+
+  // 章节正文跨域抓取：用 GM_xmlhttpRequest 带 cookie 拉取（可跨任意站点）
+  function fetchChapterViaGM(source_url) {
+    return new Promise(function (resolve, reject) {
+      if (typeof GM_xmlhttpRequest !== "function") { reject(new Error("GM_xmlhttpRequest 不可用")); return; }
+      GM_xmlhttpRequest({
+        url: source_url,
+        method: "GET",
+        headers: { "Referer": location.href },
+        timeout: 30000,
+        onload: function (resp) {
+          if (resp.status >= 200 && resp.status < 300 && resp.responseText) {
+            resolve(resp.responseText);
+          } else {
+            reject(new Error("抓取章节失败 HTTP " + resp.status));
+          }
+        },
+        onerror: function () { reject(new Error("抓取章节失败")); },
+        ontimeout: function () { reject(new Error("抓取章节超时")); }
+      });
+    });
+  }
+
+  var __jlBatchPaused = false;
+
+  // ── 批量结果聚合：把多章结果合并成一份「全书总览」（复用主窗口渲染管线）──
+  var _batchMerged = { summaries: [], characters: {}, clues: {}, terms: {}, nodes: {}, edges: {} };
+
+  function resetBatchMerge() {
+    _batchMerged = { summaries: [], characters: {}, clues: {}, terms: {}, nodes: {}, edges: {} };
+    var prog = document.getElementById("jl-batch-progress");
+    if (prog) prog.remove();
+    var chapters = document.getElementById("jl-batch-chapters");
+    if (chapters) chapters.remove();
+  }
+
+  function mergeBatchAnalysis(title, analysis, index) {
+    if (!analysis) return;
+    if (analysis.summary) _batchMerged.summaries.push({ title: title || "", index: index, summary: analysis.summary });
+
+    (analysis.characters || []).forEach(function (c) {
+      var name = (c.name || c.label || "").trim();
+      if (!name) return;
+      if (!_batchMerged.characters[name]) _batchMerged.characters[name] = [];
+      var note = c.note || c.role || "";
+      if (note && _batchMerged.characters[name].indexOf(note) === -1) _batchMerged.characters[name].push(note);
+    });
+
+    (analysis.foreshadowing || []).forEach(function (f) {
+      var clue = (f.clue || f.text || "").trim();
+      if (!clue) return;
+      if (!_batchMerged.clues[clue]) _batchMerged.clues[clue] = [];
+      var reason = f.reason || "";
+      if (reason && _batchMerged.clues[clue].indexOf(reason) === -1) _batchMerged.clues[clue].push(reason);
+    });
+
+    (analysis.terms || []).forEach(function (t) {
+      var term = (t.term || t.name || "").trim();
+      if (!term) return;
+      var meaning = t.meaning || t.note || "";
+      if (meaning) _batchMerged.terms[term] = meaning;
+    });
+
+    var g = analysis.graph || { nodes: [], edges: [] };
+    var idToLabel = {};
+    (g.nodes || []).forEach(function (n) {
+      var label = String(n.label || n.name || n.id || "").trim();
+      if (!label) return;
+      idToLabel[n.id] = label;
+      if (!_batchMerged.nodes[label]) _batchMerged.nodes[label] = { level: n.level || "normal", count: 0 };
+      _batchMerged.nodes[label].count++;
+      if (n.level === "core") _batchMerged.nodes[label].level = "core";
+    });
+    (g.edges || []).forEach(function (e) {
+      var from = idToLabel[e.from] || e.from;
+      var to = idToLabel[e.to] || e.to;
+      if (!from || !to) return;
+      var key = from + "" + to + "" + (e.label || "");
+      if (!_batchMerged.edges[key]) _batchMerged.edges[key] = { from: from, to: to, label: e.label || "" };
+    });
+  }
+
+  function mergedToResult() {
+    var charNames = Object.keys(_batchMerged.characters);
+    var clueKeys = Object.keys(_batchMerged.clues);
+    var termKeys = Object.keys(_batchMerged.terms);
+    var chapterCount = _batchMerged.summaries.length;
+
+    var overview = "📖 全书批量分析完成：共 " + chapterCount + " 章，涉及人物 " + charNames.length +
+      " 位、疑似伏笔 " + clueKeys.length + " 条、名词 " + termKeys.length +
+      " 个。切换上方「伏笔」「关系图」标签查看全书累计线索与人物网络。";
+
+    var characters = charNames.map(function (n) {
+      return { name: n, note: _batchMerged.characters[n][0] || "" };
+    });
+    var foreshadowing = clueKeys.map(function (k) {
+      return { clue: k, reason: _batchMerged.clues[k][0] || "" };
+    });
+    var terms = termKeys.map(function (t) {
+      return { term: t, meaning: _batchMerged.terms[t] || "" };
+    });
+
+    var nodeLabels = Object.keys(_batchMerged.nodes);
+    if (!nodeLabels.length) nodeLabels = Object.keys(_batchMerged.characters);
+    var nodes = nodeLabels.map(function (label, i) {
+      var n = _batchMerged.nodes[label] || { level: "normal" };
+      return { id: "b" + i, label: label, level: n.level };
+    });
+    var labelToId = {};
+    nodes.forEach(function (n) { labelToId[n.label] = n.id; });
+    var edges = Object.keys(_batchMerged.edges).map(function (k) {
+      var e = _batchMerged.edges[k];
+      var f = labelToId[e.from], t = labelToId[e.to];
+      if (!f || !t) return null;
+      return { from: f, to: t, label: e.label };
+    }).filter(Boolean);
+
+    return {
+      summary: overview,
+      characters: characters,
+      foreshadowing: foreshadowing,
+      terms: terms,
+      graph: { nodes: nodes, edges: edges },
+      raw: ""
+    };
+  }
+
+  // 注入各章摘要卡片样式（幂等）
+  function ensureBatchRenderStyle() {
+    if (document.getElementById("jl-batch-render-style")) return;
+    var st = document.createElement("style");
+    st.id = "jl-batch-render-style";
+    st.textContent =
+      "#jl-batch-chapters .jl-bc-item{padding:15px 16px;margin-bottom:10px;border:1px solid #E8DDD2;border-radius:10px;background:#FFFDF7;box-shadow:0 1px 3px rgba(44,36,22,.03);transition:box-shadow .18s,border-color .18s}" +
+      "#jl-batch-chapters .jl-bc-item:last-child{margin-bottom:0}" +
+      "#jl-batch-chapters .jl-bc-item:hover{border-color:#D7CCC8;box-shadow:0 2px 8px rgba(44,36,22,.06)}" +
+      "#jl-batch-chapters .jl-bc-head{display:flex;align-items:center;gap:10px;margin-bottom:9px;padding-bottom:8px;border-bottom:1px dashed #EDE3D8}" +
+      "#jl-batch-chapters .jl-bc-idx{flex:0 0 auto;padding:3px 11px;border-radius:999px;background:linear-gradient(135deg,#E65100,#F57C00);color:#fff;font-size:12px;font-weight:700;letter-spacing:.3px;box-shadow:0 1px 3px rgba(230,81,0,.22)}" +
+      "#jl-batch-chapters .jl-bc-title{flex:1;min-width:0;font-size:15px;font-weight:700;color:#3E2723;line-height:1.4}" +
+      "#jl-batch-chapters .jl-bc-body{font-size:13px;line-height:1.8;color:#4E3E33;white-space:pre-wrap;word-break:break-word}";
+    document.documentElement.appendChild(st);
+  }
+
+  function renderBatchChapterList() {
+    var panel = document.getElementById("jl-panel-summary");
+    if (!panel) return;
+    var old = document.getElementById("jl-batch-chapters");
+    if (old) old.remove();
+    if (!_batchMerged.summaries.length) return;
+
+    ensureBatchRenderStyle();
+
+    var card = document.createElement("div");
+    card.id = "jl-batch-chapters";
+    card.className = "jl-card";
+    var html = '<h3>📖 各章摘要 <span style="font-weight:400;font-size:12px;color:#A1887F">共 ' +
+      _batchMerged.summaries.length + ' 章</span></h3>';
+    var sortedSummaries = _batchMerged.summaries.slice().sort(function (a, b) {
+      var ai = (typeof a.index === "number") ? a.index : null;
+      var bi = (typeof b.index === "number") ? b.index : null;
+      if (ai == null && bi == null) return 0;
+      if (ai == null) return 1;
+      if (bi == null) return -1;
+      return ai - bi;
+    });
+    sortedSummaries.forEach(function (s) {
+      var idx = (typeof s.index === "number") ? ('<span class="jl-bc-idx">第 ' + s.index + ' 章</span>') : "";
+      html +=
+        '<div class="jl-bc-item">' +
+          '<div class="jl-bc-head">' + idx + '<span class="jl-bc-title">' + escHtml(s.title) + '</span></div>' +
+          '<div class="jl-bc-body">' + escHtml(s.summary) + '</div>' +
+        '</div>';
+    });
+    card.innerHTML = html;
+    var summaryCard = panel.querySelector(".jl-card");
+    if (summaryCard && summaryCard.nextSibling) {
+      panel.insertBefore(card, summaryCard.nextSibling);
+    } else {
+      panel.appendChild(card);
+    }
+  }
+
+  function renderBatchSkipNote(analyzedCount, skippedAlready, skippedPaywall, skippedFetch, skippedError, failedChapters) {
+    var panel = document.getElementById("jl-panel-summary");
+    if (!panel) return;
+    var old = document.getElementById("jl-batch-skip-note");
+    if (old) old.remove();
+
+    var skippedTotal = skippedAlready + skippedPaywall + skippedFetch + skippedError;
+    if (skippedTotal === 0) return;
+
+    var parts = [];
+    if (analyzedCount > 0) parts.push("✅ 成功分析 " + analyzedCount + " 章");
+    if (skippedAlready > 0) parts.push("⏭ 已分析过（不重复扣额度）" + skippedAlready + " 章");
+    if (skippedPaywall > 0) parts.push("🔒 付费章节跳过 " + skippedPaywall + " 章");
+    if (skippedFetch > 0) parts.push("⚠️ 正文抓取失败 " + skippedFetch + " 章");
+    if (skippedError > 0) {
+      parts.push("❌ 分析失败 " + skippedError + " 章");
+      (failedChapters || []).forEach(function (t) { parts.push("　· " + escHtml(t)); });
+    }
+
+    var note = document.createElement("div");
+    note.id = "jl-batch-skip-note";
+    note.className = "jl-card";
+    note.style.borderLeft = "4px solid #FFB300";
+    note.style.background = "#FFFDF5";
+    note.innerHTML =
+      '<h3 style="margin:0 0 8px;color:#8D6E63">📋 本次批量小结</h3>' +
+      '<div style="font-size:13px;line-height:1.9;color:#5D4037">' +
+        parts.map(function (p) { return '<div style="padding:1px 0">' + p + '</div>'; }).join("") +
+      '</div>';
+    var first = panel.querySelector(".jl-card");
+    if (first) first.insertAdjacentElement("afterend", note);
+    else panel.appendChild(note);
+  }
+
+  // 进度 UI：写入概况面板（主窗口内），不另开浮层
+  function batchProgressUI(done, total, text) {
+    var panel = document.getElementById("jl-panel-summary");
+    if (!panel) return;
+    var box = document.getElementById("jl-batch-progress");
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "jl-batch-progress";
+      box.className = "jl-card";
+      box.style.borderLeft = "3px solid #E65100";
+      panel.insertBefore(box, panel.firstChild);
+    }
+    var pct = total ? Math.round((done / total) * 100) : 0;
+    box.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
+        '<h3 style="margin:0;color:#E65100">📚 批量分析进行中</h3>' +
+        '<span style="font-size:12px;font-weight:700;color:#fff;background:linear-gradient(135deg,#E65100,#F57C00);padding:2px 11px;border-radius:999px;box-shadow:0 1px 3px rgba(230,81,0,.25)">' + pct + '%</span>' +
+      '</div>' +
+      '<div style="height:12px;background:#F0E8DE;border-radius:999px;overflow:hidden">' +
+        '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,#E65100,#F57C00);border-radius:999px;transition:width .3s;box-shadow:0 0 8px rgba(230,81,0,.35)"></div></div>' +
+      '<p style="font-size:12px;color:#5D4037;margin:10px 0 0">' + escHtml(text || (done + " / " + total + " 章")) + '</p>';
+  }
+
+  async function runBatchJob(jobData) {
+    var jobId = jobData.job_id || jobData.id;
+    var total = jobData.total || 0;
+
+    createWindow();
+    var heading = document.getElementById("jl-heading");
+    if (heading) heading.textContent = getBookTitle() || "批量分析";
+    document.querySelectorAll(".jl-tab").forEach(function (t) {
+      t.classList.toggle("is-active", t.dataset.panel === "summary");
+    });
+    document.querySelectorAll(".jl-panel").forEach(function (p) {
+      p.classList.toggle("is-active", p.id === "jl-panel-summary");
+    });
+    resetBatchMerge();
+    batchProgressUI(0, total, "准备中…");
+
+    var API = await getAPI();
+    var token = await getToken();
+    var jobResp = await fetchWithRetry(API + "/api/analyze/batch/" + jobId, {
+      headers: { "Authorization": "Bearer " + token },
+    }, 2);
+    var jobBody = await jobResp.json();
+    var items = (jobBody.data && jobBody.data.items) || [];
+    var jobInfo = (jobBody.data && jobBody.data.job) || {};
+    if (jobInfo.book_id) {
+      _currentBookId = jobInfo.book_id;
+      _currentBookTitle = jobInfo.book_title || getBookTitle() || "当前书籍";
+      var btag = document.getElementById("jl-book-tag");
+      if (btag) btag.textContent = "当前：" + _currentBookTitle;
+      updateQABookTag();
+    }
+    if (!total) total = items.length;
+    var pending = items.filter(function (i) { return i.status === "pending" || i.status === "failed"; });
+    var done = total - pending.length;
+    var skippedAlready = items.filter(function (i) { return i.status === "skipped"; }).length;
+    var skippedPaywall = 0, skippedFetch = 0, skippedError = 0, analyzedCount = 0;
+    var failedChapters = [];
+    batchProgressUI(done, total);
+
+    function skipItem(item) {
+      return fetchWithRetry(API + "/api/analyze/batch/" + jobId + "/skip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify({ item_id: item.id }),
+      }, 2).then(function (r) { return r.json(); });
+    }
+    function submitItem(item, text) {
+      return fetchWithRetry(API + "/api/analyze/batch/" + jobId + "/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify({ item_id: item.id, text: text }),
+      }, 2).then(function (r) { return r.json(); });
+    }
+
+    var FETCH_POOL = 4;
+    var fetched = new Array(pending.length);
+    var fi = 0;
+    var fetchWorkers = [];
+    for (var w = 0; w < Math.min(FETCH_POOL, pending.length); w++) {
+      fetchWorkers.push((async function () {
+        while (true) {
+          if (__jlBatchPaused) return;
+          var idx = fi++;
+          if (idx >= pending.length) return;
+          var item = pending[idx];
+          try {
+            var f = await fetchChapterText(item.source_url);
+            fetched[idx] = { item: item, text: (f && f.text) || "", paywall: !!(f && f.paywall) };
+          } catch (e) {
+            fetched[idx] = { item: item, text: "", paywall: false, error: true };
+          }
+        }
+      })());
+    }
+    await Promise.all(fetchWorkers);
+
+    var SUBMIT_POOL = 2;
+    var si = 0;
+    var submitWorkers = [];
+    for (var w2 = 0; w2 < Math.min(SUBMIT_POOL, pending.length); w2++) {
+      submitWorkers.push((async function () {
+        while (true) {
+          if (__jlBatchPaused) return;
+          var idx = si++;
+          if (idx >= pending.length) return;
+          var f = fetched[idx];
+          var item = f.item;
+          if (f.error) {
+            skippedFetch++;
+            batchProgressUI(done, total, "抓取失败：" + item.chapter_title);
+            continue;
+          }
+          if (f.paywall || !f.text || f.text.length < 80) {
+            if (f.paywall) {
+              var sb = await skipItem(item);
+              if (sb && sb.success) {
+                skippedPaywall++;
+                done++;
+                batchProgressUI(done, total, "已跳过付费章节：" + item.chapter_title);
+              } else {
+                batchProgressUI(done, total, "跳过失败：" + item.chapter_title);
+              }
+            } else {
+              skippedFetch++;
+              batchProgressUI(done, total, "抓取失败：" + item.chapter_title);
+            }
+            continue;
+          }
+          var body = await submitItem(item, f.text);
+          if (!(body && body.success)) {
+            var err = (body && body.error) || "";
+            if (/额度不足/.test(err)) {
+              batchProgressUI(done, total, "额度不足，任务已暂停，攒够后点「📚 批量分析」续跑");
+              __jlBatchPaused = true;
+              return;
+            }
+            if (/请求太频繁/.test(err)) {
+              await new Promise(function (res) { setTimeout(res, 3000); });
+              body = await submitItem(item, f.text);
+            }
+          }
+          if (body && body.success) {
+            done++;
+            analyzedCount++;
+            mergeBatchAnalysis(item.chapter_title, body.data && body.data.result && body.data.result.result, item.chapter_index);
+            batchProgressUI(done, total, "已分析 " + done + " / " + total + " 章");
+          } else {
+            skippedError++;
+            done++;
+            var failMsg = (body && body.error) || "";
+            failedChapters.push(item.chapter_title + (failMsg ? "：" + failMsg : ""));
+            batchProgressUI(done, total, "分析失败：" + item.chapter_title + (failMsg ? "（" + failMsg + "）" : ""));
+          }
+        }
+      })());
+    }
+    await Promise.all(submitWorkers);
+
+    __jlBatchPaused = false;
+    var prog = document.getElementById("jl-batch-progress");
+    if (prog) prog.remove();
+    // 复用单章渲染管线：概况/伏笔/关系图都展示全书合并结果
+    var mergedResult = mergedToResult();
+    renderResult(mergedResult);
+    renderBatchChapterList();
+    renderBatchSkipNote(analyzedCount, skippedAlready, skippedPaywall, skippedFetch, skippedError, failedChapters);
+    // 建立书籍上下文后刷新「历史分析」列表，批量分析过的章节即可在下拉/历史里看到
+    loadAnalysisHistory();
+  }
+
 
 })();
