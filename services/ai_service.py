@@ -292,11 +292,11 @@ JSON 结构：
     try:
         parsed = _extract_json(raw)
     except (ValueError, json.JSONDecodeError):
-        # 终极兜底：把 AI 返回的原始文本当作摘要
-        clean_text = re.sub(r"```[\s\S]*?```", "", raw).strip()
-        if len(clean_text) < 20:
+        # 终极兜底：把 AI 返回的原始文本转为纯文本摘要（先剥离 JSON 结构符，避免把原始 JSON 直接展示给用户）
+        plain = _raw_to_plain_text(raw)
+        if plain == "AI 返回内容异常，请稍后重试":
             raise RuntimeError("AI 返回内容异常，请稍后重试")
-        return _normalize_result({"summary": clean_text[:800]}, raw, degraded=True)
+        return _normalize_result({"summary": plain}, raw, degraded=True)
 
     return _normalize_result(parsed, raw)
 
