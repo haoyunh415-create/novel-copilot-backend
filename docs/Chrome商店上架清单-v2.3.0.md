@@ -1,4 +1,4 @@
-# 🔗 Chrome Web Store 上架清单 v2.3.0
+# 🔗 Chrome Web Store 上架清单 v2.3.11
 
 > 打开 [Chrome Web Store 开发者后台](https://chrome.google.com/webstore/devconsole) → 找到「鉴来助手」→ 修改商品信息
 
@@ -6,9 +6,9 @@
 
 ## 📦 上传文件
 
-**插件 ZIP 包：** `jianlai-helper-v2.3.0.zip`（已生成，2.7MB）
+**插件 ZIP 包：** `jianlai-helper-v2.3.11.zip`（已生成，约 194KB）
 
-路径：`C:\Users\32639\novel-copilot-backend\jianlai-helper-v2.3.0.zip`
+路径：`C:\Users\32639\novel-copilot-backend\jianlai-helper-v2.3.11.zip`
 
 ---
 
@@ -33,7 +33,9 @@ AI 自动追踪小说伏笔、生成人物关系图、无剧透前情提要。�
 <li>📝 <strong>智能章节摘要</strong> — AI 自动提炼每章前情提要，支持简洁/标准/详细三种粒度，追更不迷路</li>
 <li>🕵️ <strong>伏笔雷达</strong> — 自动识别文中疑似伏笔并标注可信度，跨章追踪伏笔的铺设与回收</li>
 <li>👥 <strong>人物关系图谱</strong> — 自动生成可视化人物关系网络图，核心角色高亮，支持单章/全书两种视图</li>
+<li>📚 <strong>批量分析</strong> — 目录页一键勾选多章批量分析，合并全书摘要、伏笔与人物关系图，回补历史章节更省心</li>
 <li>💬 <strong>无剧透问答</strong> — 基于已读内容回答你的疑问，绝不剧透后续章节</li>
+<li>🔍 <strong>划词查角色</strong> — 选中小说中的角色名，一键查看该角色的档案与出场脉络</li>
 <li>📊 <strong>全书复盘</strong> — 综合分析全部已读章节，一键梳理完整剧情脉络</li>
 </ul>
 
@@ -46,9 +48,9 @@ AI 自动追踪小说伏笔、生成人物关系图、无剧透前情提要。�
 
 <h3>🛠️ 快速上手</h3>
 <ol>
-<li>安装插件后，点击浏览器工具栏的插件图标</li>
-<li>打开任意支持的小说阅读网站章节页面</li>
-<li>点击分析按钮，AI 将自动生成本章摘要和伏笔提示</li>
+<li>安装插件后，打开任意支持的小说阅读网站章节页面</li>
+<li>点击右下角「⚡ 分析本章」，AI 将自动生成本章摘要和伏笔提示</li>
+<li>想一次看多章：进入小说目录页，点「📚 批量分析」勾选章节，合并全书摘要/伏笔/人物关系图</li>
 </ol>
 
 <h3>🔒 隐私保护</h3>
@@ -133,7 +135,7 @@ AI 自动追踪小说伏笔、生成人物关系图、无剧透前情提要。�
 
 1. 打开 https://chrome.google.com/webstore/devconsole
 2. 找到「鉴来助手 - 小说 AI 伏笔雷达」
-3. **Package** → Upload new package → 选择 `jianlai-helper-v2.3.0.zip`
+3. **Package** → Upload new package → 选择 `jianlai-helper-v2.3.11.zip`
 4. **Store listing** → 按本文档更新名称/说明/截图
 5. **Privacy** → 确认隐私政策 URL 正确
 6. **Submit for review** → 提交审核
