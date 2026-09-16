@@ -3043,12 +3043,13 @@
     var st = document.createElement("style");
     st.id = "jl-batch-render-style";
     st.textContent =
-      "#jl-batch-chapters .jl-bc-item{padding:14px 0;border-top:1px solid #F0E8DE}" +
-      "#jl-batch-chapters .jl-bc-item:first-child{border-top:0}" +
-      "#jl-batch-chapters .jl-bc-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}" +
-      "#jl-batch-chapters .jl-bc-idx{flex:0 0 auto;padding:2px 9px;border-radius:10px;background:#E65100;color:#fff;font-size:11px;font-weight:600;letter-spacing:.3px}" +
-      "#jl-batch-chapters .jl-bc-title{font-size:14px;font-weight:700;color:#3E2723;line-height:1.4}" +
-      "#jl-batch-chapters .jl-bc-body{font-size:13px;line-height:1.75;color:#4E3E33;white-space:pre-wrap;word-break:break-word}";
+      "#jl-batch-chapters .jl-bc-item{padding:15px 16px;margin-bottom:10px;border:1px solid #E8DDD2;border-radius:10px;background:#FFFDF7;box-shadow:0 1px 3px rgba(44,36,22,.03);transition:box-shadow .18s,border-color .18s}" +
+      "#jl-batch-chapters .jl-bc-item:last-child{margin-bottom:0}" +
+      "#jl-batch-chapters .jl-bc-item:hover{border-color:#D7CCC8;box-shadow:0 2px 8px rgba(44,36,22,.06)}" +
+      "#jl-batch-chapters .jl-bc-head{display:flex;align-items:center;gap:10px;margin-bottom:9px;padding-bottom:8px;border-bottom:1px dashed #EDE3D8}" +
+      "#jl-batch-chapters .jl-bc-idx{flex:0 0 auto;padding:3px 11px;border-radius:999px;background:linear-gradient(135deg,#E65100,#F57C00);color:#fff;font-size:12px;font-weight:700;letter-spacing:.3px;box-shadow:0 1px 3px rgba(230,81,0,.22)}" +
+      "#jl-batch-chapters .jl-bc-title{flex:1;min-width:0;font-size:15px;font-weight:700;color:#3E2723;line-height:1.4}" +
+      "#jl-batch-chapters .jl-bc-body{font-size:13px;line-height:1.8;color:#4E3E33;white-space:pre-wrap;word-break:break-word}";
     document.documentElement.appendChild(st);
   }
 
@@ -3067,7 +3068,16 @@
     card.className = "jl-card";
     var html = '<h3>📖 各章摘要 <span style="font-weight:400;font-size:12px;color:#A1887F">共 ' +
       _batchMerged.summaries.length + ' 章</span></h3>';
-    _batchMerged.summaries.forEach(function (s) {
+    // 并行抓取/提交导致各章摘要按「完成顺序」乱序，这里按章节号升序重排（缺序号放末尾）
+    var sortedSummaries = _batchMerged.summaries.slice().sort(function (a, b) {
+      var ai = (typeof a.index === "number") ? a.index : null;
+      var bi = (typeof b.index === "number") ? b.index : null;
+      if (ai == null && bi == null) return 0;
+      if (ai == null) return 1;
+      if (bi == null) return -1;
+      return ai - bi;
+    });
+    sortedSummaries.forEach(function (s) {
       var idx = (typeof s.index === "number") ? ('<span class="jl-bc-idx">第 ' + s.index + ' 章</span>') : "";
       html +=
         '<div class="jl-bc-item">' +
@@ -3084,6 +3094,41 @@
     }
   }
 
+  // 批量结束小结：明确展示「分析/跳过」明细，避免用户误以为漏分析
+  function renderBatchSkipNote(analyzedCount, skippedAlready, skippedPaywall, skippedFetch, skippedError, failedChapters) {
+    var panel = document.getElementById("jl-panel-summary");
+    if (!panel) return;
+    var old = document.getElementById("jl-batch-skip-note");
+    if (old) old.remove();
+
+    var skippedTotal = skippedAlready + skippedPaywall + skippedFetch + skippedError;
+    if (skippedTotal === 0) return;  // 全部成功，无需小结
+
+    var parts = [];
+    if (analyzedCount > 0) parts.push("✅ 成功分析 " + analyzedCount + " 章");
+    if (skippedAlready > 0) parts.push("⏭ 已分析过（不重复扣额度）" + skippedAlready + " 章");
+    if (skippedPaywall > 0) parts.push("🔒 付费章节跳过 " + skippedPaywall + " 章");
+    if (skippedFetch > 0) parts.push("⚠️ 正文抓取失败 " + skippedFetch + " 章");
+    if (skippedError > 0) {
+      parts.push("❌ 分析失败 " + skippedError + " 章");
+      (failedChapters || []).forEach(function (t) { parts.push("　· " + escHtml(t)); });
+    }
+
+    var note = document.createElement("div");
+    note.id = "jl-batch-skip-note";
+    note.className = "jl-card";
+    note.style.borderLeft = "4px solid #FFB300";
+    note.style.background = "#FFFDF5";
+    note.innerHTML =
+      '<h3 style="margin:0 0 8px;color:#8D6E63">📋 本次批量小结</h3>' +
+      '<div style="font-size:13px;line-height:1.9;color:#5D4037">' +
+        parts.map(function (p) { return '<div style="padding:1px 0">' + p + '</div>'; }).join("") +
+      '</div>';
+    var first = panel.querySelector(".jl-card");
+    if (first) first.insertAdjacentElement("afterend", note);
+    else panel.appendChild(note);
+  }
+
   // 进度 UI：写入概况面板（主窗口内），不另开浮层
   function batchProgressUI(done, total, text) {
     var panel = document.getElementById("jl-panel-summary");
@@ -3098,13 +3143,13 @@
     }
     var pct = total ? Math.round((done / total) * 100) : 0;
     box.innerHTML =
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
         '<h3 style="margin:0;color:#E65100">📚 批量分析进行中</h3>' +
-        '<span style="font-size:12px;font-weight:600;color:#E65100">' + pct + '%</span>' +
+        '<span style="font-size:12px;font-weight:700;color:#fff;background:linear-gradient(135deg,#E65100,#F57C00);padding:2px 11px;border-radius:999px;box-shadow:0 1px 3px rgba(230,81,0,.25)">' + pct + '%</span>' +
       '</div>' +
-      '<div style="height:10px;background:#F0E8DE;border-radius:6px;overflow:hidden">' +
-        '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,#E65100,#F57C00);border-radius:6px;transition:width .3s"></div></div>' +
-      '<p style="font-size:12px;color:#5D4037;margin:8px 0 0">' + escHtml(text || (done + " / " + total + " 章")) + '</p>';
+      '<div style="height:12px;background:#F0E8DE;border-radius:999px;overflow:hidden">' +
+        '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,#E65100,#F57C00);border-radius:999px;transition:width .3s;box-shadow:0 0 8px rgba(230,81,0,.35)"></div></div>' +
+      '<p style="font-size:12px;color:#5D4037;margin:10px 0 0">' + escHtml(text || (done + " / " + total + " 章")) + '</p>';
   }
 
   async function runBatchJob(jobData) {
@@ -3132,9 +3177,22 @@
     }, 2);
     var jobBody = await jobResp.json();
     var items = (jobBody.data && jobBody.data.items) || [];
+    // 批量任务自带 book_id：立刻建立「当前书籍」上下文，使历史分析 / 全书复盘在目录页也能用
+    var jobInfo = (jobBody.data && jobBody.data.job) || {};
+    if (jobInfo.book_id) {
+      _currentBookId = jobInfo.book_id;
+      _currentBookTitle = jobInfo.book_title || getBookTitle() || "当前书籍";
+      var btag = document.getElementById("jl-book-tag");
+      if (btag) btag.textContent = "当前：" + _currentBookTitle;
+      updateQABookTag();
+    }
     if (!total) total = items.length;
     var pending = items.filter(function (i) { return i.status === "pending" || i.status === "failed"; });
     var done = total - pending.length;
+    // 统计各类跳过原因，结束时给用户一份清晰小结（避免「勾了 5 章只分析 3 章」的困惑）
+    var skippedAlready = items.filter(function (i) { return i.status === "skipped"; }).length;
+    var skippedPaywall = 0, skippedFetch = 0, skippedError = 0, analyzedCount = 0;
+    var failedChapters = [];  // 收集分析失败的章节名+原因，结束小结里列出来
     batchProgressUI(done, total);
 
     function skipItem(item) {
@@ -3188,6 +3246,7 @@
           var f = fetched[idx];
           var item = f.item;
           if (f.error) {
+            skippedFetch++;
             batchProgressUI(done, total, "抓取失败：" + item.chapter_title);
             continue;
           }
@@ -3195,12 +3254,14 @@
             if (f.paywall) {
               var sb = await skipItem(item);
               if (sb && sb.success) {
+                skippedPaywall++;
                 done++;
                 batchProgressUI(done, total, "已跳过付费章节：" + item.chapter_title);
               } else {
                 batchProgressUI(done, total, "跳过失败：" + item.chapter_title);
               }
             } else {
+              skippedFetch++;
               batchProgressUI(done, total, "抓取失败：" + item.chapter_title);
             }
             continue;
@@ -3220,10 +3281,15 @@
           }
           if (body && body.success) {
             done++;
+            analyzedCount++;
             mergeBatchAnalysis(item.chapter_title, body.data && body.data.result && body.data.result.result, item.chapter_index);
             batchProgressUI(done, total, "已分析 " + done + " / " + total + " 章");
           } else {
-            batchProgressUI(done, total);
+            skippedError++;
+            done++;
+            var failMsg = (body && body.error) || "";
+            failedChapters.push(item.chapter_title + (failMsg ? "：" + failMsg : ""));
+            batchProgressUI(done, total, "分析失败：" + item.chapter_title + (failMsg ? "（" + failMsg + "）" : ""));
           }
         }
       })());
@@ -3239,6 +3305,9 @@
     _graphMode = "batch";  // 关系图标签默认展示本次批量合并图，避免被「当前章节」覆盖
     renderResult(mergedResult);
     renderBatchChapterList();
+    renderBatchSkipNote(analyzedCount, skippedAlready, skippedPaywall, skippedFetch, skippedError, failedChapters);
+    // 建立书籍上下文后刷新「历史分析」列表，批量分析过的章节即可在下拉/历史里看到
+    loadAnalysisHistory();
   }
 
   // 章节页显示悬浮入口按钮（一键分析，免去点插件弹窗的步骤）

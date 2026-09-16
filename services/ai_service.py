@@ -210,7 +210,6 @@ def _normalize_result(result: dict, raw: str, degraded: bool = False):
         "characters": result.get("characters") if isinstance(result.get("characters"), list) else [],
         "foreshadowing": result.get("foreshadowing") if isinstance(result.get("foreshadowing"), list) else [],
         "terms": result.get("terms") if isinstance(result.get("terms"), list) else [],
-        "quotes": result.get("quotes") if isinstance(result.get("quotes"), list) else [],
         "graph": {
             "nodes": graph.get("nodes") if isinstance(graph.get("nodes"), list) else [],
             "edges": graph.get("edges") if isinstance(graph.get("edges"), list) else [],
@@ -273,10 +272,9 @@ def analyze_text(text: str, chapter_title: str, detail_level: str = "standard", 
 4. terms：列出 0-3 个关键术语。每条含 term（术语）和 meaning（含义）
 5. graph.nodes：与 characters 一致，每人 id、label、level（core/normal）
 6. graph.edges：人物关系边，from、to、label（如"师徒""敌对"）
-7. quotes：本章 0-3 句最有感染力、适合做推广钩子的金句。每句含 text（原文摘录，30字以内）和 reason（为什么推荐，20字以内）
 
 JSON 结构：
-{{"summary":"...","characters":[{{"name":"","note":""}}],"foreshadowing":[{{"clue":"","reason":"","confidence":70}}],"terms":[{{"term":"","meaning":""}}],"quotes":[{{"text":"","reason":""}}],"graph":{{"nodes":[{{"id":"n1","label":"","level":"core"}}],"edges":[{{"from":"n1","to":"n2","label":""}}]}}}}
+{{"summary":"...","characters":[{{"name":"","note":""}}],"foreshadowing":[{{"clue":"","reason":"","confidence":70}}],"terms":[{{"term":"","meaning":""}}],"graph":{{"nodes":[{{"id":"n1","label":"","level":"core"}}],"edges":[{{"from":"n1","to":"n2","label":""}}]}}}}
 
 正文：
 {src_text}"""
@@ -413,9 +411,8 @@ def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = Tru
 - characters：至少列出 1 个关键人物，最多 5 个。即使章节出场人物少，也要至少标注本章最重要的 1 个人物（name + note 15字以内，说明其本章动向和重要性）
 - foreshadowing：0-3 条伏笔线索。如果章节有值得关注的细节、反常事件、暗示未来发展的内容，请标注（clue + reason 15字以内 + confidence 0-100）。尽量不要返回空数组
 - terms：0-3 个关键术语（term + meaning）
-- quotes：本章 0-3 句最有感染力、适合做推广钩子的金句（text 原文摘录 30字内 + reason 推荐理由 20字内）
 - graph：人物关系 nodes（id=n1,n2...、label、level=core/normal）+ edges（from、to、label），至少要有 1 个 node
-JSON 格式：{{"characters":[{{"name":"","note":""}}],"foreshadowing":[{{"clue":"","reason":"","confidence":70}}],"terms":[{{"term":"","meaning":""}}],"quotes":[{{"text":"","reason":""}}],"graph":{{"nodes":[{{"id":"n1","label":"","level":"core"}}],"edges":[{{"from":"n1","to":"n2","label":""}}]}}}}
+JSON 格式：{{"characters":[{{"name":"","note":""}}],"foreshadowing":[{{"clue":"","reason":"","confidence":70}}],"terms":[{{"term":"","meaning":""}}],"graph":{{"nodes":[{{"id":"n1","label":"","level":"core"}}],"edges":[{{"from":"n1","to":"n2","label":""}}]}}}}
 正文：{src_text}"""
 
     def _parse_once(src_text: str, max_tok: int, temp: float) -> dict:
@@ -811,7 +808,6 @@ def suggest_questions(book_title: str, recent_analyses: list[dict]):
 # ── 全书复盘报告 ──
 
 FULL_REPORT_COST = 20  # 消耗积分
-PROMO_COST = 10        # 引流素材消耗积分
 CHUNK_SIZE = 60        # 每批处理的章节数
 LIGHT_CHAPTERS = 10    # 少于此章数用轻量报告，更快
 
@@ -993,92 +989,3 @@ def _call_light_report_api(book_title: str, content: str, total: int,
         return payload["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError, TypeError) as exc:
         raise RuntimeError(f"报告生成失败：{payload}") from exc
-
-
-def generate_promo(book_title: str, memories: list[dict], template: str):
-    """基于已分析章节记忆生成引流文案。
-
-    template: "video"（抖音/B站口播脚本）| "review"（章节速览/书评）
-    """
-    if not API_KEY:
-        raise RuntimeError("缺少 DEEPSEEK_API_KEY")
-
-    if not memories:
-        raise RuntimeError("没有可用的章节记忆")
-
-    if template not in ("video", "review"):
-        raise RuntimeError("不支持的模板类型")
-
-    chapters_text = _build_promo_text(memories)
-    return _call_promo_api(book_title, chapters_text, len(memories), template)
-
-
-def _build_promo_text(memories: list[dict]) -> str:
-    """将章节记忆压缩为文本，额外附带每章金句作为引流钩子素材。"""
-    parts = []
-    for m in memories:
-        lines = [f"【{m.get('chapter_title', '?')}】{m.get('summary', '')[:300]}"]
-        chars = [c.get("name", "") for c in m.get("characters", [])[:5] if c.get("name")]
-        if chars:
-            lines.append(f"  人物：{', '.join(chars)}")
-        clues = [c.get("clue", "") for c in m.get("foreshadowing", [])[:3] if c.get("clue")]
-        if clues:
-            lines.append(f"  线索：{'；'.join(clues)}")
-        terms = [t.get("term", "") for t in m.get("terms", [])[:3] if t.get("term")]
-        if terms:
-            lines.append(f"  术语：{'、'.join(terms)}")
-        quotes = [q.get("text", "") for q in m.get("quotes", [])[:3] if q.get("text")]
-        if quotes:
-            lines.append(f"  金句：{'「' + '」「'.join(quotes) + '」'}")
-        parts.append("\n".join(lines))
-    return "\n".join(parts)
-
-
-def _call_promo_api(book_title: str, content: str, total: int, template: str) -> str:
-    """统一的引流文案 API 调用，按 template 切换 system prompt 与输出结构。"""
-    if template == "video":
-        system = "你是一名熟悉抖音/B站网文推广的短视频编导。口播脚本要口语化、短句、有节奏、有钩子，能留住前 3 秒观众。"
-        prompt = f"""你是《{book_title}》的推广编导。请基于以下章节记忆，写一条抖音/B站口播脚本，用于引流新读者。
-
-覆盖章节数：{total} 章
-
-规则：
-1. 只基于给定记忆，不编造情节，不剧透后文结局
-2. 开头给出 3 个可选的「开头钩子」（每个一句话，抓人眼球）
-3. 正文口语化，短句分段，像真人在对着镜头讲，自然穿插章节里的金句
-4. 结尾给一句 CTA，引导关注/评论/追更
-5. 全文用 Markdown 结构输出
-
-章节记忆：
-{content}
-
-请输出口播脚本："""
-        temperature = 0.7
-    else:
-        system = "你是一名资深网文书评人，擅长写引人入胜又不剧透的速览和书评。"
-        prompt = f"""你是《{book_title}》的书评人。请基于以下章节记忆，写一篇「章节速览 + 书评」，用于书评区/社交平台引流。
-
-覆盖章节数：{total} 章
-
-规则：
-1. 只基于给定记忆，不编造，不剧透后文
-2. 先给一句话速览（概括目前读到的内容亮点）
-3. 3-5 条亮点，每条点明能戳中读者的点，可引用章节金句
-4. 给出目标读者画像（适合谁看）
-5. 结尾一段引流引导语（带悬念/话题，不剧透）
-6. 全文用 Markdown 结构输出
-
-章节记忆：
-{content}
-
-请输出速览与书评："""
-        temperature = 0.6
-
-    payload, _finish = _call_ai([
-        {"role": "system", "content": system},
-        {"role": "user", "content": prompt},
-    ], temperature=temperature, timeout=90, max_retries=2)
-    try:
-        return payload["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError("引流文案生成失败") from exc

@@ -56,9 +56,6 @@ def friendly_error(exc: Exception) -> str:
     if "没有返回 JSON" in msg or "格式异常" in msg:
         return "AI 返回格式异常，请重试或换个章节试试"
 
-    if "引流文案" in msg:
-        return "引流文案生成失败，请稍后重试，或先多分析几章再试"
-
     if "内容太短" in msg or "正文字数不足" in msg:
         return "页面内容太少，请确保当前页面包含小说章节正文"
 
@@ -513,11 +510,6 @@ class ReviewRequest(BaseModel):
 
 class FullReportRequest(BaseModel):
     book_id: int
-
-
-class PromoRequest(BaseModel):
-    book_id: int
-    template: str  # "video"（口播脚本）| "review"（书评速览）
 
 
 def ok(data=None, msg="ok"):
@@ -2489,104 +2481,6 @@ def generate_full_report(req: FullReportRequest, user=Depends(get_user)):
         "report": report,
         "chapters_covered": len(memories),
         "credits_cost": FULL_REPORT_COST,
-    })
-
-
-@app.post("/api/report/promo")
-def generate_promo(req: PromoRequest, user=Depends(get_user)):
-    """引流素材：基于全部已分析章节生成口播脚本或书评速览。
-
-    消耗 PROMO_COST 积分，返回结构化 Markdown 文案。
-    """
-    from services.ai_service import generate_promo as do_promo
-    from services.ai_service import PROMO_COST
-
-    if req.template not in ("video", "review"):
-        return fail("不支持的模板类型")
-
-    with get_db() as conn:
-        book = conn.execute(
-            "SELECT id, title FROM books WHERE id=? AND username=?",
-            (req.book_id, user),
-        ).fetchone()
-        if not book:
-            return fail("书籍不存在")
-
-        rows = conn.execute(
-            """
-            SELECT chapter_title, chapter_index, result_json, created_at
-            FROM analyses
-            WHERE book_id=?
-            ORDER BY COALESCE(chapter_index, 999999), created_at ASC
-            """,
-            (req.book_id,),
-        ).fetchall()
-
-    if not rows:
-        return fail("该书还没有分析过的章节，请先分析至少几章后再生成引流素材")
-
-    memories = []
-    for row in rows:
-        try:
-            result = json.loads(row["result_json"])
-        except json.JSONDecodeError:
-            continue
-        memories.append({
-            "chapter_title": row["chapter_title"],
-            "summary": result.get("summary", ""),
-            "characters": result.get("characters", []),
-            "foreshadowing": result.get("foreshadowing", []),
-            "terms": result.get("terms", []),
-            "quotes": result.get("quotes", []),
-        })
-
-    if not memories:
-        return fail("章节记忆解析失败")
-
-    # 自动签到 + 检查额度
-    with get_db() as conn:
-        bonus = try_daily_bonus(conn, user)
-
-        row = conn.execute(
-            "SELECT credits FROM users WHERE username=?",
-            (user,),
-        ).fetchone()
-
-        if not row or row["credits"] < PROMO_COST:
-            msg = f"额度不足，引流素材需要 {PROMO_COST} 次额度，当前剩余 {row['credits'] if row else 0} 次"
-            if bonus > 0:
-                msg += "（今日签到已领 8 次）"
-            return fail(msg)
-
-        conn.execute(
-            "UPDATE users SET credits = credits - ? WHERE username=? AND credits >= ?",
-            (PROMO_COST, user, PROMO_COST),
-        )
-        log_usage(conn, user, "promo_material",
-                   f"引流素材: 《{book['title']}》({len(memories)}章)", -PROMO_COST)
-
-    try:
-        promo = do_promo(
-            book_title=book["title"],
-            memories=memories,
-            template=req.template,
-        )
-    except Exception as exc:
-        with get_db() as conn:
-            conn.execute(
-                "UPDATE users SET credits = credits + ? WHERE username=?",
-                (PROMO_COST, user),
-            )
-            log_usage(conn, user, "promo_material_refund",
-                       f"引流素材生成失败退款: {exc}", PROMO_COST)
-        return fail(friendly_error(exc))
-
-    return ok({
-        "book_title": book["title"],
-        "promo": promo,
-        "template": req.template,
-        "chapters_covered": len(memories),
-        "credits_cost": PROMO_COST,
     })
 
 
