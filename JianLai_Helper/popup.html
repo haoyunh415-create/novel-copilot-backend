@@ -225,12 +225,16 @@ input.invalid{border-color:var(--red);background:#FFF5F5}
       </button>
     </div>
 
-    <!-- 购买（暂未开放） -->
-    <div class="sep-text">💎 购买更多额度</div>
-    <div class="buy-coming-soon">
-      <div class="coming-soon-icon">🛠️</div>
-      <div class="coming-soon-text">支付功能即将上线</div>
-      <div class="coming-soon-sub">微信支付接入中，敬请期待</div>
+    <!-- 激活码兑换 -->
+    <div class="sep-text">🔑 激活码兑换</div>
+    <div class="card">
+      <div style="display:flex;gap:6px">
+        <input id="redeem-code" placeholder="输入激活码" style="flex:1;font-family:monospace;text-transform:uppercase" autocomplete="off" spellcheck="false">
+        <button id="redeem-btn" class="btn btn-primary" style="width:auto;min-width:72px;font-size:12px">兑换</button>
+      </div>
+      <div style="font-size:10px;color:var(--brown-light);margin-top:6px">
+        在闲鱼 / QQ 群购买激活码后在此兑换，额度立即到账
+      </div>
     </div>
 
     <!-- 底部操作 -->

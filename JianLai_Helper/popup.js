@@ -34,6 +34,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $("send-code-btn").addEventListener("click", sendEmailCode);
   $("email-login-btn").addEventListener("click", emailLogin);
+  $("redeem-btn").addEventListener("click", redeemCode);
   // 弹窗重载会丢未提交的输入：记住邮箱和验证码，切屏/重开不丢
   chrome.storage.local.get(["login_email", "login_code"], function (saved) {
     if (saved.login_email) $("login-email").value = saved.login_email;
@@ -493,6 +494,30 @@ async function startBatch() {
 async function buy(plan) {
   // 支付功能暂未开放
   showMessage("💳 微信支付接入中，敬请期待！", "info");
+}
+
+async function redeemCode() {
+  var code = $("redeem-code").value.trim().toUpperCase();
+  if (!code) {
+    showMessage("请输入激活码", "error");
+    return;
+  }
+  setLoading("redeem-btn", true);
+  try {
+    var token = (await getToken()).token;
+    var data = await apiFetch("/api/redeem", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token },
+      body: JSON.stringify({ code: code })
+    });
+    showMessage(data.message || "兑换成功", "success");
+    $("redeem-code").value = "";
+    renderState(); // 刷新额度显示
+  } catch (error) {
+    showMessage(error.message, "error");
+  } finally {
+    setLoading("redeem-btn", false);
+  }
 }
 
 async function saveApiUrl() {

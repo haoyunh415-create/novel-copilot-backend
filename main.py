@@ -395,6 +395,22 @@ def init_db():
             """
         )
 
+        # 激活码表（充值/兑换用，不依赖支付资质）
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS redeem_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT UNIQUE NOT NULL,
+                credits INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'unused',
+                used_by TEXT DEFAULT '',
+                used_at INTEGER DEFAULT NULL,
+                note TEXT DEFAULT '',
+                created_at INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+
 
 def _get_cached_analysis(conn, text_hash: str, detail_level: str, spoiler_free: int):
     """从全局缓存读取分析结果。返回 dict 或 None。"""
@@ -482,6 +498,10 @@ class GuestAnalyzeRequest(BaseModel):
 
 class BuyRequest(BaseModel):
     plan: str
+
+
+class RedeemRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=64)
 
 
 class AskRequest(BaseModel):
@@ -2747,6 +2767,46 @@ def buy(req: BuyRequest, user=Depends(get_user)):
     # }
 
 
+# —— 激活码兑换（不依赖支付资质，先人工/发卡平台卖码） ——
+
+REDEEM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # 去掉易混淆的 0/O/1/I/L
+
+
+def _generate_redeem_code() -> str:
+    """生成形如 JL-XXXX-XXXX-XXXX 的激活码（大写，去掉易混淆字符）。"""
+    def _part(n: int) -> str:
+        return "".join(secrets.choice(REDEEM_ALPHABET) for _ in range(n))
+    return f"JL-{_part(4)}-{_part(4)}-{_part(4)}"
+
+
+@app.post("/api/redeem")
+def redeem(req: RedeemRequest, user=Depends(get_user)):
+    """兑换激活码：把码对应额度加到当前用户，码只能用一次。"""
+    code = req.code.strip().upper()
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, credits, status FROM redeem_codes WHERE code=?",
+            (code,),
+        ).fetchone()
+        if not row:
+            return fail("激活码无效，请检查是否输入正确")
+        if row["status"] != "unused":
+            return fail("该激活码已被使用")
+
+        credits_added = row["credits"]
+        conn.execute(
+            "UPDATE users SET credits = credits + ? WHERE username=?",
+            (credits_added, user),
+        )
+        conn.execute(
+            "UPDATE redeem_codes SET status='used', used_by=?, used_at=? WHERE id=?",
+            (user, int(time.time()), row["id"]),
+        )
+        log_usage(conn, user, "redeem", f"激活码兑换 +{credits_added} 次额度", credits_added)
+
+    return ok({"credits_added": credits_added, "message": f"兑换成功，已到账 {credits_added} 次额度"})
+
+
 # ── 管理后台 ──
 
 ADMIN_KEY = os.getenv("ADMIN_KEY", "admin_dev_key")
@@ -3004,6 +3064,45 @@ def admin_add_credits(username: str, body: AdminCreditsBody, _admin=Depends(veri
     return ok({"message": f"已调整 {actual_username} 额度 ({delta:+d})"})
 
 
+class RedeemGenerateBody(BaseModel):
+    credits: int = Field(ge=1, le=100000)
+    count: int = Field(ge=1, le=500)
+    note: str = Field(default="", max_length=100)
+
+
+@app.post("/api/admin/redeem/generate")
+def admin_generate_redeem(body: RedeemGenerateBody, _admin=Depends(verify_admin)):
+    """批量生成激活码（管理员）。"""
+    codes = []
+    now = int(time.time())
+    with get_db() as conn:
+        for _ in range(body.count):
+            while True:
+                code = _generate_redeem_code()
+                exists = conn.execute(
+                    "SELECT 1 FROM redeem_codes WHERE code=?", (code,)
+                ).fetchone()
+                if not exists:
+                    break
+            conn.execute(
+                "INSERT INTO redeem_codes (code, credits, status, note, created_at) "
+                "VALUES (?, ?, 'unused', ?, ?)",
+                (code, body.credits, body.note, now),
+            )
+            codes.append(code)
+    return ok({"codes": codes, "credits": body.credits, "count": body.count})
+
+
+@app.get("/api/admin/redeem/codes")
+def admin_list_redeem(_admin=Depends(verify_admin)):
+    """列出激活码（管理员）。"""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM redeem_codes ORDER BY id DESC LIMIT 500"
+        ).fetchall()
+    return ok({"codes": [dict(row) for row in rows]})
+
+
 @app.get("/pay/{order_id}")
 def pay_page(order_id: int):
     """支付引导页面 - 暂未开放"""
@@ -3215,6 +3314,21 @@ th,td{padding:8px 10px;border:1px solid #e2d9d1;text-align:left}th{background:#e
 </div>
 
 <div class="card">
+<h2>激活码</h2>
+<div class="row">
+  <input id="redeem-credits" type="number" placeholder="单码额度" style="width:120px" value="100">
+  <input id="redeem-count" type="number" placeholder="生成数量" style="width:120px" value="10">
+  <input id="redeem-note" placeholder="备注（可选）" style="width:200px">
+  <button onclick="generateRedeem()">生成激活码</button>
+  <button onclick="loadRedeemCodes()" class="secondary">刷新列表</button>
+</div>
+<div style="margin-top:10px">
+  <table><thead><tr><th>ID</th><th>激活码</th><th>额度</th><th>状态</th><th>使用人</th><th>使用时间</th><th>备注</th><th>操作</th></tr></thead>
+  <tbody id="redeem-codes"><tr><td colspan="8">加载中...</td></tr></tbody></table>
+</div>
+</div>
+
+<div class="card">
 <h2>用户列表</h2>
 <table><thead><tr><th>用户名</th><th>邮箱</th><th>额度</th><th>分析次数</th><th>购买</th><th>注册时间</th><th>操作</th></tr></thead>
 <tbody id="user-list"><tr><td colspan="7">加载中...</td></tr></tbody></table>
@@ -3395,7 +3509,59 @@ async function quickRecharge(username, currentCredits) {
   } catch (e) { msg("操作失败: " + e.message, true); }
 }
 
+async function generateRedeem() {
+  const credits = parseInt(document.getElementById("redeem-credits").value, 10);
+  const count = parseInt(document.getElementById("redeem-count").value, 10);
+  const note = document.getElementById("redeem-note").value.trim();
+  if (!credits || credits < 1 || !count || count < 1) { msg("请填写有效的单码额度和生成数量", true); return; }
+  if (count > 500) { msg("一次最多生成 500 个", true); return; }
+  if (!confirm(`确认生成 ${count} 个激活码，每个 ${credits} 次额度？`)) return;
+  try {
+    const res = await fetchAPI("/api/admin/redeem/generate", {
+      method: "POST",
+      body: JSON.stringify({ credits, count, note })
+    });
+    if (res.success) {
+      msg(`已生成 ${res.data.count} 个激活码（每个 ${res.data.credits} 次）`);
+      loadRedeemCodes();
+    } else msg(res.error || "操作失败", true);
+  } catch (e) { msg("操作失败: " + e.message, true); }
+}
+
+async function loadRedeemCodes() {
+  try {
+    const res = await fetchAPI("/api/admin/redeem/codes");
+    const el = document.getElementById("redeem-codes");
+    const codes = res.data?.codes || [];
+    if (codes.length === 0) {
+      el.innerHTML = '<tr><td colspan="8">暂无激活码</td></tr>';
+    } else {
+      el.innerHTML = codes.map(c => {
+        const usedAt = c.used_at ? new Date(c.used_at * 1000).toLocaleString() : "-";
+        const status = c.status === "unused"
+          ? '<span style="color:#2e7d32;font-weight:600">未使用</span>'
+          : '<span style="color:#888">已使用</span>';
+        return `<tr>
+          <td>${c.id}</td>
+          <td style="font-family:monospace">${c.code}</td>
+          <td>${c.credits} 次</td>
+          <td>${status}</td>
+          <td>${c.used_by || "-"}</td>
+          <td style="font-size:12px">${usedAt}</td>
+          <td style="font-size:12px">${c.note || "-"}</td>
+          <td><button onclick="copyCode('${c.code}')" class="secondary" style="padding:2px 8px;font-size:12px">复制</button></td>
+        </tr>`;
+      }).join("");
+    }
+  } catch (e) { msg("加载激活码失败: " + e.message, true); }
+}
+
+function copyCode(code) {
+  navigator.clipboard.writeText(code).then(() => msg("已复制: " + code)).catch(() => msg(code, true));
+}
+
 loadData();
+loadRedeemCodes();
 setInterval(loadData, 60000);
 </script>
 </body>

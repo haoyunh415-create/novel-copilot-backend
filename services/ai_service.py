@@ -258,7 +258,7 @@ def analyze_text(text: str, chapter_title: str, detail_level: str = "standard", 
     )
 
     # 截断过长文本（DeepSeek 上下文窗口充足，但过长会变慢）
-    text = text[:8000] if len(text) > 8000 else text
+    text = text[:6000] if len(text) > 6000 else text
 
     def _build_prompt(src_text: str) -> str:
         return f"""你是一个专业的长篇小说阅读助手。{spoiler_rule}
@@ -359,7 +359,7 @@ def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = Tru
         summary = _strip_ai_chatter(raw).strip()
         return summary, finish, False
 
-    text_input = text[:8000] if len(text) > 8000 else text
+    text_input = text[:6000] if len(text) > 6000 else text
 
     # 第一次尝试：正常参数
     summary, finish, is_empty = _try_summary(text_input, max_tok=4096)
@@ -403,7 +403,7 @@ def analyze_details_only(text: str, chapter_title: str, spoiler_free: bool = Tru
         "必须开启无剧透模式：只基于当前章节文本分析，不得引用后文剧情。"
         if spoiler_free else ""
     )
-    text_input = text[:8000] if len(text) > 8000 else text
+    text_input = text[:6000] if len(text) > 6000 else text
 
     def _build_prompt(src_text: str) -> str:
         return f"""章节标题：{chapter_title}。{spoiler_rule}
@@ -467,7 +467,7 @@ def analyze_text_stream(text: str, chapter_title: str, detail_level: str = "stan
         else "可以结合常识做阅读提示，但仍然不要透露章节正文之外的明确后文剧情。"
     )
 
-    text = text[:8000] if len(text) > 8000 else text
+    text = text[:6000] if len(text) > 6000 else text
 
     prompt = f"""你是一个专业的长篇小说阅读助手。{spoiler_rule}
 

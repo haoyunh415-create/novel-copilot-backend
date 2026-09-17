@@ -1288,7 +1288,7 @@
       var errMsg = error.message || "分析失败，请稍后再试。联系客服 QQ：2313370765";
 
       if (errMsg.indexOf("额度不足") !== -1) {
-        errMsg += "\n\n💡 每天签到免费领 8 次额度，打开插件弹窗即可自动领取";
+        errMsg += "\n\n💡 每天签到免费领 8 次额度；有激活码可点下方「兑换激活码」立即到账";
       }
 
       setText("#jl-summary", errMsg);
@@ -1308,6 +1308,15 @@
           runAnalyze();
         });
         summaryCard.appendChild(retryBtn);
+
+        if (errMsg.indexOf("额度不足") !== -1) {
+          var redeemBtn = document.createElement("button");
+          redeemBtn.id = "jl-redeem-btn";
+          redeemBtn.textContent = "🔑 兑换激活码";
+          redeemBtn.style.cssText = "margin-top:10px;margin-left:8px;padding:8px 16px;border:1px solid #5d4037;border-radius:6px;background:#fff;color:#5d4037;font-size:13px;cursor:pointer";
+          redeemBtn.addEventListener("click", function () { redeemCreditFlow(redeemBtn); });
+          summaryCard.appendChild(redeemBtn);
+        }
       }
     } finally {
       clearInterval(runTimer);
@@ -1315,6 +1324,45 @@
       runBtn.disabled = false;
       runBtn.textContent = "重新分析";
       runBtn.style.animation = "";
+    }
+  }
+
+  // ═══════════ 激活码兑换 ═══════════
+
+  async function redeemCreditFlow(btn) {
+    var token = await getToken();
+    if (!token) {
+      alert("请先登录后再兑换激活码（登录后每天还送 8 次额度）");
+      return;
+    }
+    var code = prompt("请输入激活码（形如 JL-XXXX-XXXX-XXXX）：");
+    if (!code) return;
+    code = code.trim().toUpperCase();
+    if (!code) return;
+
+    if (btn) { btn.disabled = true; btn.textContent = "兑换中..."; }
+    try {
+      var API = await getAPI();
+      var resp = await fetch(API + "/api/redeem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify({ code: code })
+      });
+      var data = await resp.json();
+      if (data && data.success) {
+        alert(data.data && data.data.message ? data.data.message : "兑换成功");
+        var oldRedeem = document.getElementById("jl-redeem-btn");
+        if (oldRedeem) oldRedeem.remove();
+        var oldRetry = document.getElementById("jl-retry-btn");
+        if (oldRetry) oldRetry.remove();
+        runAnalyze();
+      } else {
+        alert((data && data.error) || "兑换失败，请检查激活码是否输入正确");
+      }
+    } catch (e) {
+      alert("兑换失败：" + (e && e.message ? e.message : "网络错误"));
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "🔑 兑换激活码"; }
     }
   }
 

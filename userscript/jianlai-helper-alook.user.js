@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.15
+// @version      2.3.16
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -735,6 +735,10 @@
             '<p style="margin:0 0 6px;font-size:13px">👤 <b id="jl-acc-username"></b></p>' +
             '<p style="margin:0 0 6px;font-size:13px">剩余额度：<b id="jl-acc-credits"></b> 次（每天打开本页自动签到）</p>' +
             '<p id="jl-acc-low" style="display:none;color:#E65100;font-size:12px;margin:0 0 6px"></p>' +
+            '<div style="display:flex;gap:6px;margin:8px 0">' +
+              '<input id="jl-redeem-code" class="jl-input" type="text" placeholder="激活码" style="flex:1;text-transform:uppercase">' +
+              '<button id="jl-redeem-btn" class="jl-btn-plain">兑换</button>' +
+            '</div>' +
             '<button id="jl-logout" class="jl-btn-plain" style="margin-top:6px">退出登录</button>' +
           '</div>' +
           '<div class="jl-card">' +
@@ -797,6 +801,7 @@
     win.querySelector("#jl-send-code").addEventListener("click", sendEmailCode);
     win.querySelector("#jl-login-btn").addEventListener("click", emailLogin);
     win.querySelector("#jl-logout").addEventListener("click", logout);
+    win.querySelector("#jl-redeem-btn").addEventListener("click", redeemAccount);
     win.querySelector("#jl-api-save").addEventListener("click", saveApiUrl);
     win.querySelector("#jl-api-url").value = store.get("api_url") || "https://jianla.xyz:8000";
     win.querySelectorAll(".jl-tab").forEach((tab) => {
@@ -2555,6 +2560,43 @@
     } catch (error) {
       // 网络错误不清除登录态，仅提示（区别于 401）
       accMessage(error.message || "网络错误，稍后重试", "error");
+    }
+  }
+
+  async function redeemAccount() {
+    var token = await getToken();
+    if (!token) {
+      accMessage("请先登录后再兑换", "error");
+      return;
+    }
+    var codeInput = document.getElementById("jl-redeem-code");
+    var code = (codeInput.value || "").trim().toUpperCase();
+    if (!code) {
+      accMessage("请输入激活码", "error");
+      return;
+    }
+    var btn = document.getElementById("jl-redeem-btn");
+    btn.disabled = true;
+    btn.textContent = "兑换中...";
+    try {
+      var API = await getAPI();
+      var resp = await fetch(API + "/api/redeem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify({ code: code })
+      });
+      var payload = await resp.json().catch(function () { return null; });
+      if (!resp.ok || !payload || !payload.success) {
+        throw new Error((payload && payload.error) || "兑换失败，请检查激活码");
+      }
+      accMessage(payload.data.message || "兑换成功", "success");
+      codeInput.value = "";
+      renderAccountPanel();
+    } catch (error) {
+      accMessage(error.message, "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "兑换";
     }
   }
 
