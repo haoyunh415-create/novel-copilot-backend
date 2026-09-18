@@ -85,6 +85,41 @@ describe("parseCatalog filters non-chapter links", () => {
   });
 });
 
+describe("parseCatalog qidian nav-link collision", () => {
+  it("keeps 第一章/第二章 despite nav links sharing their URLs", () => {
+    // 起点目录页真实 DOM：导航链接「旧版/下一章」的 href 与真实章节相同，
+    // 旧版去重逻辑按完整 URL 去重会把真实章节当作重复项丢弃 → 第一章/第二章缺失
+    const html = `
+      <html><body>
+        <a href="https://read.qidian.com/chapter/1050032171/916642635">旧版</a>
+        <a href="//www.qidian.com/chapter/1050032171/917568467/">下一章</a>
+        <a href="//www.qidian.com/chapter/1050032171/916642635/">第一章 仙府</a>
+        <a href="//www.qidian.com/chapter/1050032171/917568467/">第二章 异界</a>
+        <a href="//www.qidian.com/chapter/1050032171/917568468/">第三章 觉醒</a>
+      </body></html>`;
+    const list = P.parseCatalog(html, "qidian");
+    const titles = list.map((c) => c.chapter_title);
+    // 导航标签「旧版/下一章」应被剔除；第一章/第二章不能被当作重复项丢弃
+    expect(titles).toEqual(["第一章 仙府", "第二章 异界", "第三章 觉醒"]);
+    expect(list[0].chapter_index).toBe(1);
+    expect(list[1].chapter_index).toBe(2);
+  });
+
+  it("chapterId treats read.qidian.com / www.qidian.com / trailing slash as one chapter", () => {
+    expect(P.chapterId("/chapter/1050032171/916642635/")).toBe("916642635");
+    expect(P.chapterId("https://read.qidian.com/chapter/1050032171/916642635")).toBe("916642635");
+    expect(P.chapterId("https://www.qidian.com/chapter/1050032171/916642635")).toBe("916642635");
+    expect(P.chapterId("/book/1/101.html")).toBe(null);
+  });
+
+  it("isNavLabel blocks catalog nav labels", () => {
+    expect(P.isNavLabel("旧版")).toBe(true);
+    expect(P.isNavLabel("下一章")).toBe(true);
+    expect(P.isNavLabel("上一章")).toBe(true);
+    expect(P.isNavLabel("第一章 仙府")).toBe(false);
+  });
+});
+
 describe("extractIndex qidian chapter-id fallback", () => {
   it("parses /chapter/{book}/{chap}/ href as index when title has no number", () => {
     expect(P.extractIndex("某章标题", "https://www.qidian.com/chapter/1049996017/915654463/")).toBe(915654463);

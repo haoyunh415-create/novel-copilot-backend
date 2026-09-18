@@ -64,22 +64,43 @@
     try { return new URL(href, baseHref || "http://x/").href; } catch (_) { return null; }
   }
 
+  // 导航/操作类链接标题（起点目录页常混入「旧版/下一章/上一章」等跳转链接，其 href 与真实章节相同）
+  function isNavLabel(t) {
+    return /^(旧版|新版|下一章|上一章|下一节|上一节|下一页|上一页|目录|章节目录|章节列表|返回目录|返回书页|立即阅读|开始阅读|免费试读|试读|全文阅读|阅读全文|加入书架|书架|点击阅读|展开全部|收起)$/.test(t || "");
+  }
+
+  // 起点章节唯一 ID：/chapter/{book}/{cid}/ 中的 cid（read.qidian.com / www.qidian.com / 尾斜杠 视为同一章）
+  function chapterId(href) {
+    var m = (href || "").match(/\/chapter\/\d+\/(\d+)\/?/i);
+    return m ? m[1] : null;
+  }
+
   function parseCatalog(html, site) {
     var doc = parseHtml(html);
     var anchors = Array.from(doc.querySelectorAll("a[href]"));
-    var seen = new Set();
+    var indexByKey = {};   // 去重键 → out 下标（保留 DOM 阅读顺序）
     var out = [];
     anchors.forEach(function (a) {
       var href = a.getAttribute("href");
       if (!href) return;
       var title = cleanTitle(a.textContent || a.getAttribute("title"));
       if (!title || title.length < 1 || title.length > 120) return;
+      if (isNavLabel(title)) return;
       if (!isChapterTitle(title) && !looksLikeChapterHref(href)) return;
       var abs = absoluteUrl(doc, href);
       if (!abs) return;
-      if (seen.has(abs)) return;
-      seen.add(abs);
-      out.push({ chapter_title: title, chapter_index: extractIndex(title, href), source_url: abs });
+      var cid = chapterId(href) || chapterId(abs);
+      var key = cid ? ("cid:" + cid) : ("url:" + abs);
+      var entry = { chapter_title: title, chapter_index: extractIndex(title, href), source_url: abs };
+      var idx = indexByKey[key];
+      if (idx !== undefined) {
+        // 同一章重复出现（导航链接撞真实章节）：优先保留带「第X章」标题的条目
+        var prev = out[idx];
+        if (isChapterTitle(title) && !isChapterTitle(prev.chapter_title)) out[idx] = entry;
+        return;
+      }
+      indexByKey[key] = out.length;
+      out.push(entry);
     });
     return out;
   }
@@ -133,6 +154,8 @@
     cleanTitle: cleanTitle,
     isChapterTitle: isChapterTitle,
     looksLikeChapterHref: looksLikeChapterHref,
+    isNavLabel: isNavLabel,
+    chapterId: chapterId,
     isPaywall: isPaywall,
   };
 })();
