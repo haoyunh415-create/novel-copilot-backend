@@ -811,6 +811,7 @@
               '<input id="jl-redeem-code" class="jl-input" type="text" placeholder="激活码" style="flex:1;text-transform:uppercase">' +
               '<button id="jl-redeem-btn" class="jl-btn-plain">兑换</button>' +
             '</div>' +
+            '<p style="margin:4px 0 0;font-size:11px;color:#A1887F">咨询 / 购码请加 QQ 群：660517237</p>' +
             '<button id="jl-logout" class="jl-btn-plain" style="margin-top:6px">退出登录</button>' +
           '</div>' +
           '<div class="jl-card">' +
