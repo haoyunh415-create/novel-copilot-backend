@@ -321,6 +321,7 @@ footer a:hover{color:var(--vermillion)}
 
 /* ═══════ Responsive ═══════ */
 @media(max-width:768px){
+  .nav-store{display:none}
   .feature-grid{grid-template-columns:repeat(2,1fr)}
   .steps-grid{grid-template-columns:1fr}
   .shot-grid{grid-template-columns:1fr}
@@ -347,8 +348,9 @@ footer a:hover{color:var(--vermillion)}
       </svg>
       鉴来助手
     </a>
-    <a href="https://microsoftedge.microsoft.com/addons/detail/%E9%89%B4%E6%9D%A5%E5%8A%A9%E6%89%8B-%E5%B0%8F%E8%AF%B4-ai-%E4%BC%8F%E7%AC%94%E9%9B%B7%E8%BE%BE/nmanflfocdfldmijbfngdbgpaoodbkcp" class="nav-cta" target="_blank" rel="noopener">🌐 Edge 商店</a>
-    <a href="https://chromewebstore.google.com/detail/%E9%89%B4%E6%9D%A5%E5%8A%A9%E6%89%8B-%E5%B0%8F%E8%AF%B4-ai-%E4%BC%8F%E7%AC%94%E9%9B%B7%E8%BE%BE/ahahdepghanijblcddabfpeipbclobil" class="nav-cta" style="background:transparent;color:var(--brown-dark);border:1px solid var(--brown-light)" target="_blank" rel="noopener">Chrome</a>
+    <a href="https://microsoftedge.microsoft.com/addons/detail/%E9%89%B4%E6%9D%A5%E5%8A%A9%E6%89%8B-%E5%B0%8F%E8%AF%B4-ai-%E4%BC%8F%E7%AC%94%E9%9B%B7%E8%BE%BE/nmanflfocdfldmijbfngdbgpaoodbkcp" class="nav-cta nav-store" target="_blank" rel="noopener">🌐 Edge 商店</a>
+    <a href="https://chromewebstore.google.com/detail/%E9%89%B4%E6%9D%A5%E5%8A%A9%E6%89%8B-%E5%B0%8F%E8%AF%B4-ai-%E4%BC%8F%E7%AC%94%E9%9B%B7%E8%BE%BE/ahahdepghanijblcddabfpeipbclobil" class="nav-cta nav-store" style="background:transparent;color:var(--brown-dark);border:1px solid var(--brown-light)" target="_blank" rel="noopener">Chrome</a>
+    <a href="#" id="qq-cta" class="nav-cta" style="background:var(--vermillion)" title="点击复制 QQ 群号">💬 咨询群 660517237</a>
   </div>
 </nav>
 
@@ -639,6 +641,20 @@ footer a:hover{color:var(--vermillion)}
     es.forEach(function(e){if(e.isIntersecting){e.target.classList.add("on");obs.unobserve(e.target)}})
   },{threshold:.12});
   document.querySelectorAll(".reveal").forEach(function(el){obs.observe(el)});
+  var qqBtn = document.getElementById("qq-cta");
+  if (qqBtn) {
+    qqBtn.addEventListener("click", function (e) {
+      e.preventDefault();
+      var g = "660517237";
+      var done = function () {
+        qqBtn.textContent = "✓ 已复制群号 " + g;
+        setTimeout(function () { qqBtn.textContent = "💬 咨询群 " + g; }, 2000);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(g).then(done, done);
+      } else { done(); }
+    });
+  }
 })();
 // Tracking — 上报到后端服务器
 fetch("https://jianla.xyz/api/track",{
