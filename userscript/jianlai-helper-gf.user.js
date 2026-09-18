@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.16
+// @version      2.3.17
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 15+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -1107,6 +1107,10 @@
     }
 
     var text = getChapterText();
+    if (isPaywall(document.body.innerText || "")) {
+      setText("#jl-summary", "🔒 疑似付费/会员章节，已跳过（未扣额度）。开通会员后可继续阅读，或换其它免费章节分析。");
+      return;
+    }
     if (text.length < 80) {
       setText("#jl-summary", isFanqieSite()
         ? "⚠️ 番茄小说正文已加密，暂无法自动分析。\n\n请手动复制本章正文后粘贴重试，或换起点等其它网站。"
@@ -1376,6 +1380,10 @@
     lastCallTime = now;
 
     const text = getChapterText();
+    if (isPaywall(document.body.innerText || "")) {
+      setText("#jl-summary", "🔒 疑似付费/会员章节，已跳过（未扣额度）。开通会员后可继续阅读，或换其它免费章节分析。");
+      return;
+    }
     if (text.length < 80) {
       setText("#jl-summary", isFanqieSite()
         ? "⚠️ 番茄小说正文已加密，暂无法自动分析。\n\n请手动复制本章正文后粘贴重试，或换起点等其它网站。"
@@ -3118,7 +3126,7 @@
     // 付费/会员章节的锁定页特征（正文抓取为空时再结合判定，避免误跳可读章节）
     function isPaywall(html) {
       if (!html) return false;
-      return /(本章为付费|付费章节|付费内容|会员专享|订阅后|订阅本章|订阅解锁|请先订阅|开通VIP|开通会员|购买本章|VIP章节|VIP用户|剩余章节|需付费|充值阅读|阅读券|阅币)/i.test(html);
+      return /(本章为付费|付费章节|付费内容|会员专享|会员解锁|番茄会员|成为会员|需会员|订阅后|订阅本章|订阅解锁|请先订阅|开通VIP|开通会员|购买本章|VIP章节|VIP用户|剩余章节|剩余内容|解锁本章|解锁全文|免费试读|需付费|充值阅读|阅读券|阅币)/i.test(html);
     }
 
     function cnToInt(s) {
@@ -3939,7 +3947,7 @@
             batchProgressUI(done, total, "抓取失败：" + item.chapter_title);
             continue;
           }
-          if (f.paywall || !f.text || f.text.length < 80) {
+          if (f.paywall || !f.text || f.text.length < 300) {
             if (f.paywall) {
               var sb = await skipItem(item);
               if (sb && sb.success) {

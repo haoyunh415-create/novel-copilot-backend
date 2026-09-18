@@ -136,6 +136,11 @@ describe("isPaywall", () => {
     expect(P.isPaywall('<div>开通VIP即可继续阅读</div>')).toBe(true);
     expect(P.isPaywall('<div>剩余章节需付费，成为会员</div>')).toBe(true);
   });
+  it("detects fanqie member-lock markers", () => {
+    expect(P.isPaywall('<div>以下内容需会员解锁</div>')).toBe(true);
+    expect(P.isPaywall('<div>剩余内容需开通番茄会员</div>')).toBe(true);
+    expect(P.isPaywall('<div>成为会员免费阅读</div>')).toBe(true);
+  });
   it("rejects normal chapter body and empty", () => {
     expect(P.isPaywall('<div id="content"><p>第一章 正文内容很长很长</p></div>')).toBe(false);
     expect(P.isPaywall("")).toBe(false);

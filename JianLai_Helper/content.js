@@ -1015,6 +1015,10 @@
     }
 
     var text = getChapterText();
+    if (globalThis.JLBatchParser && globalThis.JLBatchParser.isPaywall(document.body.innerText || "")) {
+      setText("#jl-summary", "🔒 疑似付费/会员章节，已跳过（未扣额度）。开通会员后可继续阅读，或换其它免费章节分析。");
+      return;
+    }
     if (text.length < 80) {
       setText("#jl-summary", isFanqieSite()
         ? "⚠️ 番茄小说正文已加密，暂无法自动分析。\n\n请手动复制本章正文后粘贴重试，或换起点等其它网站。"
@@ -1174,6 +1178,10 @@
     lastCallTime = now;
 
     const text = getChapterText();
+    if (globalThis.JLBatchParser && globalThis.JLBatchParser.isPaywall(document.body.innerText || "")) {
+      setText("#jl-summary", "🔒 疑似付费/会员章节，已跳过（未扣额度）。开通会员后可继续阅读，或换其它免费章节分析。");
+      return;
+    }
     if (text.length < 80) {
       setText("#jl-summary", isFanqieSite()
         ? "⚠️ 番茄小说正文已加密，暂无法自动分析。\n\n请手动复制本章正文后粘贴重试，或换起点等其它网站。"
@@ -3319,7 +3327,7 @@
             batchProgressUI(done, total, "抓取失败：" + item.chapter_title);
             continue;
           }
-          if (f.paywall || !f.text || f.text.length < 80) {
+          if (f.paywall || !f.text || f.text.length < 300) {
             if (f.paywall) {
               var sb = await skipItem(item);
               if (sb && sb.success) {
