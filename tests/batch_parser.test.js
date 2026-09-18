@@ -140,6 +140,9 @@ describe("isPaywall", () => {
     expect(P.isPaywall('<div>以下内容需会员解锁</div>')).toBe(true);
     expect(P.isPaywall('<div>剩余内容需开通番茄会员</div>')).toBe(true);
     expect(P.isPaywall('<div>成为会员免费阅读</div>')).toBe(true);
+    expect(P.isPaywall('<div>购买APP会员还可享受网页畅读权益</div>')).toBe(true);
+    expect(P.isPaywall('<div>充会员解锁剩下文章内容</div>')).toBe(true);
+    expect(P.isPaywall('<div>本章为VIP抢先看章节</div>')).toBe(true);
   });
   it("rejects normal chapter body and empty", () => {
     expect(P.isPaywall('<div id="content"><p>第一章 正文内容很长很长</p></div>')).toBe(false);
