@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.18
+// @version      2.3.19
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -818,8 +818,17 @@
     win.querySelector("#jl-run").addEventListener("click", runAnalyze);
     win.querySelector("#jl-batch").addEventListener("click", startBatchFromWindow);
     win.querySelector("#jl-clear-batch").addEventListener("click", function () {
-      if (!confirm("确定清空所有批量分析历史任务吗？已生成的分析结果不受影响。")) return;
-      clearBatchTasks().then(function (n) { alert(n > 0 ? "已清空 " + n + " 个历史任务" : "暂无历史任务"); });
+      jlModal({
+        title: "清空批量任务",
+        message: "确定清空所有批量分析历史任务吗？已生成的分析结果不受影响。",
+        confirmText: "清空",
+        cancelText: "取消"
+      }).then(function (ok) {
+        if (!ok) return;
+        clearBatchTasks().then(function (n) {
+          jlModal({ title: "清空批量任务", message: n > 0 ? "已清空 " + n + " 个历史任务" : "暂无历史任务" });
+        });
+      });
     });
     win.querySelector("#jl-ask").addEventListener("click", askMemory);
     win.querySelector("#jl-suggest-btn").addEventListener("click", fetchSuggestedQuestions);
@@ -3409,7 +3418,7 @@
       var html = document.documentElement.outerHTML;
       var all = globalThis.JLBatchParser.parseCatalog(html, detectSite());
       if (!all.length) {
-        alert("未在目录页解析到章节列表");
+        jlModal({ title: "批量分析", message: "未在目录页解析到章节列表，请刷新后重试。" });
         return;
       }
       showBatchChapterPicker(all);
@@ -3420,7 +3429,7 @@
       try { sessionStorage.setItem("jl_auto_batch", "1"); } catch (_) {}
       location.href = catalogUrl;
     } else {
-      alert("请先打开小说的目录页（章节列表页），再点批量分析");
+      jlModal({ title: "批量分析", message: "请先打开小说的目录页（章节列表页），再点批量分析。" });
     }
   }
 
@@ -3438,11 +3447,16 @@
       return resp.json();
     }).then(function (body) {
       var jobs = (body && body.data && body.data.jobs) || [];
-      if (jobs.length && confirm("检测到 " + jobs.length + " 个未完成批量任务，是否续跑最近一个？（点“取消”则新建任务）")) {
-        runBatchJob(jobs[0]);
-      } else {
-        confirmBatchStart(selectedList);
-      }
+      if (!jobs.length) { confirmBatchStart(selectedList); return; }
+      jlModal({
+        title: "续跑批量任务",
+        message: "检测到 " + jobs.length + " 个未完成批量任务，是否续跑最近一个？",
+        confirmText: "续跑",
+        cancelText: "新建任务"
+      }).then(function (ok) {
+        if (ok) runBatchJob(jobs[0]);
+        else confirmBatchStart(selectedList);
+      });
     }).catch(function () {
       confirmBatchStart(selectedList);
     });
@@ -3467,6 +3481,50 @@
     startBatchFromWindow();
   }
 
+  // 显眼的自定义弹窗（替代原生 alert/confirm 的白色小弹窗）：深色遮罩 + 橙色主按钮，居中高对比
+  function ensureModalStyle() {
+    if (document.getElementById("jl-modal-style")) return;
+    var st = document.createElement("style");
+    st.id = "jl-modal-style";
+    st.textContent =
+      "#jl-modal-mask{position:fixed;inset:0;z-index:2147483647;background:rgba(18,12,8,.62);display:flex;align-items:center;justify-content:center;font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;animation:jlFadeIn .18s ease}" +
+      "#jl-modal-mask .jl-modal-card{width:min(420px,calc(100vw - 36px));background:#FFFDF7;border:2px solid #E65100;border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.5);overflow:hidden}" +
+      "#jl-modal-mask .jl-modal-title{display:flex;align-items:center;gap:8px;padding:16px 20px;color:#fff;background:linear-gradient(135deg,#3E2723,#5D4037,#6D4C41);font-size:17px;font-weight:700;letter-spacing:.5px}" +
+      "#jl-modal-mask .jl-modal-msg{color:#3E2723;padding:20px;font-size:14.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word}" +
+      "#jl-modal-mask .jl-modal-btns{display:flex;gap:10px;padding:0 20px 18px}" +
+      "#jl-modal-mask .jl-modal-btn{flex:1;padding:12px 10px;border:1px solid #D7CCC8;border-radius:10px;background:#FFF;color:#5D4037;font-size:15px;font-weight:600;cursor:pointer;transition:all .15s ease}" +
+      "#jl-modal-mask .jl-modal-btn:hover{background:#F5EDE0;border-color:#8D6E63}" +
+      "#jl-modal-mask .jl-modal-ok{color:#fff;background:linear-gradient(135deg,#E65100,#F57C00);border:0;box-shadow:0 3px 10px rgba(230,81,0,.35)}" +
+      "#jl-modal-mask .jl-modal-ok:hover{box-shadow:0 5px 16px rgba(230,81,0,.5)}";
+    document.documentElement.appendChild(st);
+  }
+
+  function jlModal(opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      var old = document.getElementById("jl-modal-mask");
+      if (old) old.remove();
+      ensureModalStyle();
+      var mask = document.createElement("div");
+      mask.id = "jl-modal-mask";
+      mask.innerHTML =
+        '<div class="jl-modal-card">' +
+          '<div class="jl-modal-title">' + escHtml(opts.title || "提示") + '</div>' +
+          '<div class="jl-modal-msg">' + escHtml(opts.message || "") + '</div>' +
+          '<div class="jl-modal-btns">' +
+            (opts.confirmText ? '<button class="jl-modal-btn jl-modal-cancel">' + escHtml(opts.cancelText || "取消") + '</button>' : '') +
+            '<button class="jl-modal-btn jl-modal-ok">' + escHtml(opts.confirmText || "知道了") + '</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(mask);
+      var close = function (val) { mask.remove(); resolve(val); };
+      mask.querySelector(".jl-modal-ok").addEventListener("click", function () { close(true); });
+      var cancelBtn = mask.querySelector(".jl-modal-cancel");
+      if (cancelBtn) cancelBtn.addEventListener("click", function () { close(false); });
+      mask.addEventListener("click", function (e) { if (e.target === mask) close(false); });
+    });
+  }
+
   function guessCatalogUrl() {
     var h = location.hostname;
     var path = location.pathname;
@@ -3476,9 +3534,24 @@
       if (m) return "https://www.qidian.com/book/" + m[1] + "/";
       return null;
     }
+    // 番茄：阅读页书名/返回入口通常指向 /page/{book_id}（书详情页 = 目录页）
+    if (/fanqienovel\.com/i.test(h)) {
+      var nav = document.querySelector(".muye-reader-nav-title");
+      var navA = nav ? (nav.tagName === "A" ? nav : nav.closest("a")) : null;
+      if (navA) {
+        var nh = navA.getAttribute("href");
+        if (nh && /\/(page|book)\/\d+/i.test(nh)) return new URL(nh, location.href).href;
+      }
+    }
+    // 通用：优先按 href 目录页特征，再按文本「目录」入口
     var links = document.querySelectorAll("a[href]");
-    for (var i = 0; i < links.length; i++) {
-      var t = (links[i].textContent || "").trim();
+    var i, href, t;
+    for (i = 0; i < links.length; i++) {
+      href = links[i].getAttribute("href");
+      if (href && /\/(page|book|catalog|mulu)\/\d+/i.test(href)) return links[i].href;
+    }
+    for (i = 0; i < links.length; i++) {
+      t = (links[i].textContent || "").trim();
       if (/(目录|章节列表|章节目录|全部章节)/.test(t) && links[i].href) {
         return links[i].href;
       }
@@ -3503,7 +3576,7 @@
   async function startBatchJob(list) {
     var API = await getAPI();
     var token = await getToken();
-    if (!token) { alert("请先登录"); return null; }
+    if (!token) { jlModal({ title: "批量分析", message: "请先登录后再批量分析。" }); return null; }
     var resp = await fetchWithRetry(API + "/api/analyze/batch/create", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
@@ -3516,9 +3589,9 @@
       }),
     }, 2);
     var data = await resp.json();
-    if (!data.success) { alert(data.error || "创建任务失败"); return null; }
+    if (!data.success) { jlModal({ title: "批量分析", message: data.error || "创建任务失败" }); return null; }
     var d = data.data;
-    alert("任务已创建：共 " + d.total + " 章，需分析 " + d.pending + " 章，已跳过 " + d.skipped + " 章");
+    jlModal({ title: "批量分析", message: "任务已创建：共 " + d.total + " 章，需分析 " + d.pending + " 章，已跳过 " + d.skipped + " 章" });
     return d;
   }
 
