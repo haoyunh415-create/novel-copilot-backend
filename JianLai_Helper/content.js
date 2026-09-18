@@ -2724,6 +2724,10 @@
     for (var i = sorted.length - defaultCount; i < sorted.length; i++) {
       defaultSet[sorted[i].source_url] = true;
     }
+    // 勾选状态以 source_url 为键维护，切换正序/倒序不丢勾选
+    var checkedSet = {};
+    for (var k in defaultSet) checkedSet[k] = true;
+    var desc = localStorage.getItem("JL_Batch_Order") !== "asc"; // 默认倒序（最新在前）
 
     ensureBatchPickerStyle();
 
@@ -2741,6 +2745,7 @@
             '<button class="jlbp-btn" data-act="all">全选</button>' +
             '<button class="jlbp-btn" data-act="none">全不选</button>' +
             '<button class="jlbp-btn" data-act="latest">选最新 ' + savedN + ' 章</button>' +
+            '<button class="jlbp-btn" id="jlbp-order" title="切换章节列表正序/倒序">' + (desc ? "倒序 ⇅" : "正序 ⇅") + '</button>' +
           '</div>' +
         '</div>' +
         '<div class="jlbp-list" id="jlbp-list"></div>' +
@@ -2751,58 +2756,74 @@
       '</div>';
     document.body.appendChild(mask);
 
-    var urlToChapter = {};
-    sorted.forEach(function (c) { urlToChapter[c.source_url] = c; });
-
     var listEl = mask.querySelector("#jlbp-list");
-    // 倒序渲染：最新章在最前，默认勾选的章节一眼可见
-    sorted.slice().reverse().forEach(function (c) {
-      var checked = defaultSet[c.source_url] ? "checked" : "";
-      var idxLabel = (typeof c.chapter_index === "number") ? ("第 " + c.chapter_index + " 章") : "";
-      var label = document.createElement("label");
-      label.className = "jlbp-item";
-      label.innerHTML =
-        '<input type="checkbox" class="jlbp-check" data-url="' + escHtml(c.source_url) + '" ' + checked + '>' +
-        '<span class="jlbp-idx">' + escHtml(idxLabel) + '</span>' +
-        '<span class="jlbp-name">' + escHtml(c.chapter_title) + '</span>';
-      listEl.appendChild(label);
-    });
+
+    function renderList() {
+      listEl.innerHTML = "";
+      var items = desc ? sorted.slice().reverse() : sorted;
+      items.forEach(function (c) {
+        var checked = checkedSet[c.source_url] ? "checked" : "";
+        var idxLabel = (typeof c.chapter_index === "number") ? ("第 " + c.chapter_index + " 章") : "";
+        var label = document.createElement("label");
+        label.className = "jlbp-item";
+        label.innerHTML =
+          '<input type="checkbox" class="jlbp-check" data-url="' + escHtml(c.source_url) + '" ' + checked + '>' +
+          '<span class="jlbp-idx">' + escHtml(idxLabel) + '</span>' +
+          '<span class="jlbp-name">' + escHtml(c.chapter_title) + '</span>';
+        listEl.appendChild(label);
+      });
+      refreshCount();
+    }
 
     function refreshCount() {
-      var boxes = listEl.querySelectorAll(".jlbp-check");
       var n = 0;
-      boxes.forEach(function (b) { if (b.checked) n++; });
+      for (var k in checkedSet) n++;
       mask.querySelector("#jlbp-count").textContent = String(n);
       mask.querySelector("#jlbp-start-n").textContent = String(n);
       mask.querySelector(".jlbp-start").disabled = n === 0;
     }
-    refreshCount();
 
-    listEl.addEventListener("change", refreshCount);
+    renderList();
+
+    listEl.addEventListener("change", function (e) {
+      var box = e.target;
+      if (!box || !box.classList || !box.classList.contains("jlbp-check")) return;
+      var url = box.getAttribute("data-url");
+      if (box.checked) checkedSet[url] = true; else delete checkedSet[url];
+      refreshCount();
+    });
 
     mask.querySelector(".jlbp-close").addEventListener("click", function () { mask.remove(); });
     mask.querySelector(".jlbp-cancel").addEventListener("click", function () { mask.remove(); });
+
+    var orderBtn = mask.querySelector("#jlbp-order");
+    orderBtn.addEventListener("click", function () {
+      desc = !desc;
+      try { localStorage.setItem("JL_Batch_Order", desc ? "desc" : "asc"); } catch (_) {}
+      orderBtn.textContent = desc ? "倒序 ⇅" : "正序 ⇅";
+      renderList();
+    });
+
     mask.querySelectorAll(".jlbp-btn[data-act]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var act = btn.getAttribute("data-act");
-        var boxes = listEl.querySelectorAll(".jlbp-check");
         if (act === "all") {
-          boxes.forEach(function (b) { b.checked = true; });
+          sorted.forEach(function (c) { checkedSet[c.source_url] = true; });
         } else if (act === "none") {
-          boxes.forEach(function (b) { b.checked = false; });
+          checkedSet = {};
         } else if (act === "latest") {
-          // 倒序渲染 → 最新 N 章是前 N 个 DOM 项
-          var n = savedN;
-          boxes.forEach(function (b, i) { b.checked = i < n; });
+          checkedSet = {};
+          for (var k in defaultSet) checkedSet[k] = true;
         }
-        refreshCount();
+        renderList();
       });
     });
 
     mask.querySelector(".jlbp-start").addEventListener("click", function () {
+      // 提交顺序按章节号倒序（最新在前），保持既有批量分析顺序
       var selected = [];
-      listEl.querySelectorAll(".jlbp-check").forEach(function (b) {
-        if (b.checked && urlToChapter[b.dataset.url]) selected.push(urlToChapter[b.dataset.url]);
+      sorted.slice().reverse().forEach(function (c) {
+        if (checkedSet[c.source_url]) selected.push(c);
       });
       if (!selected.length) return;
       try { localStorage.setItem("JL_Batch_Count", String(selected.length)); } catch (_) {}

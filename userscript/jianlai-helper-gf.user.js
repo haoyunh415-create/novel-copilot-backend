@@ -3157,22 +3157,43 @@
       try { return new URL(href, baseHref || "http://x/").href; } catch (_) { return null; }
     }
 
+    // 导航/操作类链接标题（起点目录页常混入「旧版/下一章/上一章」等跳转链接，其 href 与真实章节相同）
+    function isNavLabel(t) {
+      return /^(旧版|新版|下一章|上一章|下一节|上一节|下一页|上一页|目录|章节目录|章节列表|返回目录|返回书页|立即阅读|开始阅读|免费试读|试读|全文阅读|阅读全文|加入书架|书架|点击阅读|展开全部|收起)$/.test(t || "");
+    }
+
+    // 起点章节唯一 ID：/chapter/{book}/{cid}/ 中的 cid（read.qidian.com / www.qidian.com / 尾斜杠 视为同一章）
+    function chapterId(href) {
+      var m = (href || "").match(/\/chapter\/\d+\/(\d+)\/?/i);
+      return m ? m[1] : null;
+    }
+
     function parseCatalog(html, site) {
       var doc = parseHtml(html);
       var anchors = Array.from(doc.querySelectorAll("a[href]"));
-      var seen = new Set();
+      var indexByKey = {};   // 去重键 → out 下标（保留 DOM 阅读顺序）
       var out = [];
       anchors.forEach(function (a) {
         var href = a.getAttribute("href");
         if (!href) return;
         var title = cleanTitle(a.textContent || a.getAttribute("title"));
         if (!title || title.length < 1 || title.length > 120) return;
+        if (isNavLabel(title)) return;
         if (!isChapterTitle(title) && !looksLikeChapterHref(href)) return;
         var abs = absoluteUrl(doc, href);
         if (!abs) return;
-        if (seen.has(abs)) return;
-        seen.add(abs);
-        out.push({ chapter_title: title, chapter_index: extractIndex(title, href), source_url: abs });
+        var cid = chapterId(href) || chapterId(abs);
+        var key = cid ? ("cid:" + cid) : ("url:" + abs);
+        var entry = { chapter_title: title, chapter_index: extractIndex(title, href), source_url: abs };
+        var idx = indexByKey[key];
+        if (idx !== undefined) {
+          // 同一章重复出现（导航链接撞真实章节）：优先保留带「第X章」标题的条目
+          var prev = out[idx];
+          if (isChapterTitle(title) && !isChapterTitle(prev.chapter_title)) out[idx] = entry;
+          return;
+        }
+        indexByKey[key] = out.length;
+        out.push(entry);
       });
       return out;
     }
@@ -3290,6 +3311,7 @@
     var oldMask = document.getElementById("jl-batch-picker-mask");
     if (oldMask) oldMask.remove();
 
+    // 排序：与 selectLatest 一致 —— 全数字序号则升序，否则信任 DOM 阅读顺序
     var sorted = all.slice();
     var allNumeric = sorted.every(function (c) { return typeof c.chapter_index === "number"; });
     if (allNumeric && sorted.length > 1) {
@@ -3303,6 +3325,10 @@
     for (var i = sorted.length - defaultCount; i < sorted.length; i++) {
       defaultSet[sorted[i].source_url] = true;
     }
+    // 勾选状态以 source_url 为键维护，切换正序/倒序不丢勾选
+    var checkedSet = {};
+    for (var k in defaultSet) checkedSet[k] = true;
+    var desc = localStorage.getItem("JL_Batch_Order") !== "asc"; // 默认倒序（最新在前）
 
     ensureBatchPickerStyle();
 
@@ -3320,6 +3346,7 @@
             '<button class="jlbp-btn" data-act="all">全选</button>' +
             '<button class="jlbp-btn" data-act="none">全不选</button>' +
             '<button class="jlbp-btn" data-act="latest">选最新 ' + savedN + ' 章</button>' +
+            '<button class="jlbp-btn" id="jlbp-order" title="切换章节列表正序/倒序">' + (desc ? "倒序 ⇅" : "正序 ⇅") + '</button>' +
           '</div>' +
         '</div>' +
         '<div class="jlbp-list" id="jlbp-list"></div>' +
@@ -3330,56 +3357,74 @@
       '</div>';
     document.body.appendChild(mask);
 
-    var urlToChapter = {};
-    sorted.forEach(function (c) { urlToChapter[c.source_url] = c; });
-
     var listEl = mask.querySelector("#jlbp-list");
-    sorted.slice().reverse().forEach(function (c) {
-      var checked = defaultSet[c.source_url] ? "checked" : "";
-      var idxLabel = (typeof c.chapter_index === "number") ? ("第 " + c.chapter_index + " 章") : "";
-      var label = document.createElement("label");
-      label.className = "jlbp-item";
-      label.innerHTML =
-        '<input type="checkbox" class="jlbp-check" data-url="' + escHtml(c.source_url) + '" ' + checked + '>' +
-        '<span class="jlbp-idx">' + escHtml(idxLabel) + '</span>' +
-        '<span class="jlbp-name">' + escHtml(c.chapter_title) + '</span>';
-      listEl.appendChild(label);
-    });
+
+    function renderList() {
+      listEl.innerHTML = "";
+      var items = desc ? sorted.slice().reverse() : sorted;
+      items.forEach(function (c) {
+        var checked = checkedSet[c.source_url] ? "checked" : "";
+        var idxLabel = (typeof c.chapter_index === "number") ? ("第 " + c.chapter_index + " 章") : "";
+        var label = document.createElement("label");
+        label.className = "jlbp-item";
+        label.innerHTML =
+          '<input type="checkbox" class="jlbp-check" data-url="' + escHtml(c.source_url) + '" ' + checked + '>' +
+          '<span class="jlbp-idx">' + escHtml(idxLabel) + '</span>' +
+          '<span class="jlbp-name">' + escHtml(c.chapter_title) + '</span>';
+        listEl.appendChild(label);
+      });
+      refreshCount();
+    }
 
     function refreshCount() {
-      var boxes = listEl.querySelectorAll(".jlbp-check");
       var n = 0;
-      boxes.forEach(function (b) { if (b.checked) n++; });
+      for (var k in checkedSet) n++;
       mask.querySelector("#jlbp-count").textContent = String(n);
       mask.querySelector("#jlbp-start-n").textContent = String(n);
       mask.querySelector(".jlbp-start").disabled = n === 0;
     }
-    refreshCount();
 
-    listEl.addEventListener("change", refreshCount);
+    renderList();
+
+    listEl.addEventListener("change", function (e) {
+      var box = e.target;
+      if (!box || !box.classList || !box.classList.contains("jlbp-check")) return;
+      var url = box.getAttribute("data-url");
+      if (box.checked) checkedSet[url] = true; else delete checkedSet[url];
+      refreshCount();
+    });
 
     mask.querySelector(".jlbp-close").addEventListener("click", function () { mask.remove(); });
     mask.querySelector(".jlbp-cancel").addEventListener("click", function () { mask.remove(); });
+
+    var orderBtn = mask.querySelector("#jlbp-order");
+    orderBtn.addEventListener("click", function () {
+      desc = !desc;
+      try { localStorage.setItem("JL_Batch_Order", desc ? "desc" : "asc"); } catch (_) {}
+      orderBtn.textContent = desc ? "倒序 ⇅" : "正序 ⇅";
+      renderList();
+    });
+
     mask.querySelectorAll(".jlbp-btn[data-act]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var act = btn.getAttribute("data-act");
-        var boxes = listEl.querySelectorAll(".jlbp-check");
         if (act === "all") {
-          boxes.forEach(function (b) { b.checked = true; });
+          sorted.forEach(function (c) { checkedSet[c.source_url] = true; });
         } else if (act === "none") {
-          boxes.forEach(function (b) { b.checked = false; });
+          checkedSet = {};
         } else if (act === "latest") {
-          var n = savedN;
-          boxes.forEach(function (b, i) { b.checked = i < n; });
+          checkedSet = {};
+          for (var k in defaultSet) checkedSet[k] = true;
         }
-        refreshCount();
+        renderList();
       });
     });
 
     mask.querySelector(".jlbp-start").addEventListener("click", function () {
+      // 提交顺序按章节号倒序（最新在前），保持既有批量分析顺序
       var selected = [];
-      listEl.querySelectorAll(".jlbp-check").forEach(function (b) {
-        if (b.checked && urlToChapter[b.dataset.url]) selected.push(urlToChapter[b.dataset.url]);
+      sorted.slice().reverse().forEach(function (c) {
+        if (checkedSet[c.source_url]) selected.push(c);
       });
       if (!selected.length) return;
       try { localStorage.setItem("JL_Batch_Count", String(selected.length)); } catch (_) {}
