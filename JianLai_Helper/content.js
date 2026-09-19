@@ -1336,10 +1336,12 @@
         return;
       }
 
-      // 起点错位字体解密：还原被动态字体错位的正文（旧章节无加密字体时自动跳过）
-      if (isQidianSite()) {
-        text = await tryDecodeQidian(text, API, token);
-      }
+      // 起点「错位字体」：实测 innerText 已是明文（该字体只影响屏幕渲染/截图防 OCR，
+      // 不改 DOM 文本），解密反而会把明文搅乱成乱码，故关闭。若未来遇到真正乱码的起点
+      // 章节，再启用下方解密逻辑。
+      // if (isQidianSite()) {
+      //   text = await tryDecodeQidian(text, API, token);
+      // }
 
       const chapterTitle = getChapterTitle();
       setText("#jl-heading", chapterTitle);
