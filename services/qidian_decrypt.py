@@ -32,27 +32,37 @@ from PIL import Image, ImageDraw, ImageFont
 
 # ── 标准参照字体（用于字形比对的基准字体）─────────────────────────────
 # 依次尝试；服务器部署时可用 fonts-noto-cjk 或文泉驿，或设 QIDIAN_STD_FONT 指定。
+# 量化对比（门/学/兴/真）证明：Noto 整体误配最少、误配分散度最低，仅系统性把
+# 「门」配成「闪」等形近字；这类低置信度模糊匹配由 _SECONDARY_FONT_CANDIDATES
+# 的 simhei 二次消歧修正（见 build_mapping）。故主字体优先 Noto。
 _STD_FONT_CANDIDATES = [
     os.environ.get("QIDIAN_STD_FONT", ""),   # 环境变量优先（服务器部署可指定路径）
-    # 起点错位字体是「阅文黑体 YWHeiTi」（Fontello svg2ttf 生成），笔画风格最接近
-    # 中易黑体 simhei，而不是 Noto。用 Noto 会系统性把「门」误配成「闪」等形近字，
-    # 用 simhei 则可正确区分。故把 simhei 放在 Noto 之前。
-    "/opt/novel-copilot-backend/fonts/simhei.ttf",  # 服务器部署（scp 上传）
-    "/usr/share/fonts/truetype/simhei.ttf",
-    "C:/Windows/Fonts/simhei.ttf",           # Windows 黑体
-    "C:/Windows/Fonts/msyh.ttc",             # Windows 微软雅黑
-    "C:/Windows/Fonts/simsun.ttc",           # Windows 宋体
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    # Windows 本地（无 Noto）回退
+    "C:/Windows/Fonts/simhei.ttf",
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/simsun.ttc",
+]
+
+# 辅助消歧字体：与主字体风格互补，专门修正「门/闪」这类主字体低置信度的模糊匹配。
+# 服务器用 scp 上传的 simhei；Windows 本地回退黑体/雅黑。
+_SECONDARY_FONT_CANDIDATES = [
+    os.environ.get("QIDIAN_SECONDARY_FONT", ""),
+    "/opt/novel-copilot-backend/fonts/simhei.ttf",  # 服务器部署（scp 上传）
+    "/usr/share/fonts/truetype/simhei.ttf",
+    "C:/Windows/Fonts/simhei.ttf",
+    "C:/Windows/Fonts/msyh.ttc",
 ]
 
 _CANVAS = 64          # 字形渲染画布边长
 _GLYPH = 48           # 归一化（裁边缩放）后的字形边长
 _FONT_SIZE = 64       # 渲染字号
 _MIN_COSINE = 0.35    # 余弦相似度低于该阈值视为匹配失败（保留原字符）
+_MARGIN = 0.12        # 主字体 top1-top2 相似度差小于此值视为「模糊」，需辅助字体消歧
 
 _HTTP_HEADERS = {
     "User-Agent": (
@@ -67,6 +77,9 @@ _lock = threading.Lock()
 _std_font: Optional[ImageFont.FreeTypeFont] = None
 _std_chars: List[str] = []
 _std_matrix: Optional[np.ndarray] = None      # (N, _CANVAS*_CANVAS) float32 单位向量
+_secondary_font: Optional[ImageFont.FreeTypeFont] = None
+_secondary_chars: List[str] = []
+_secondary_matrix: Optional[np.ndarray] = None  # 辅助消歧字体（simhei）的单位向量矩阵
 _mapping_cache: Dict[str, Dict[int, str]] = {}  # 字体 sha1 → {码点: 真实字}
 
 logger = logging.getLogger("qidian_decrypt")
@@ -115,6 +128,40 @@ def _load_std_library() -> Tuple[List[str], np.ndarray]:
         _std_font = font
         _std_chars = chars
         _std_matrix = matrix
+        return chars, matrix
+
+
+def _find_secondary_font_path() -> Optional[str]:
+    """在候选路径里找一个存在的辅助消歧字体。"""
+    for path in _SECONDARY_FONT_CANDIDATES:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
+def _load_secondary_library() -> Tuple[Optional[List[str]], Optional[np.ndarray]]:
+    """加载辅助消歧字库（simhei）。找不到时返回 (None, None)，消歧自动跳过。
+
+    与主字库同构：渲染 GB2312 一级字，返回 (字符列表, 单位向量矩阵)。
+    """
+    global _secondary_font, _secondary_chars, _secondary_matrix
+    with _lock:
+        if _secondary_matrix is not None:
+            return _secondary_chars, _secondary_matrix
+
+        path = _find_secondary_font_path()
+        if not path:
+            _secondary_chars = []
+            _secondary_matrix = None
+            return None, None
+
+        font = ImageFont.truetype(path, _FONT_SIZE)
+        chars = _gb2312_level1_chars()
+        matrix = np.stack([_render_vector(ch, font) for ch in chars]).astype(np.float32)
+
+        _secondary_font = font
+        _secondary_chars = chars
+        _secondary_matrix = matrix
         return chars, matrix
 
 
@@ -194,14 +241,38 @@ def build_mapping(font_bytes: bytes, codepoints: Optional[set] = None) -> Dict[i
     # 2. 一次矩阵乘法算所有相似度（比逐字 matvec 快一个数量级）
     char_matrix = np.stack(vecs).astype(np.float32)     # (N, _CANVAS*_CANVAS)
     sims = std_matrix @ char_matrix.T                   # (3755, N) 余弦相似度
-    best_idx = np.argmax(sims, axis=0)                  # (N,)
-    best_sim = sims[best_idx, np.arange(len(best_idx))]  # (N,)
+    n = len(valid_targets)
+
+    # 每列取 top1 / top2，用于判断「模糊」并触发辅助字体消歧
+    top2_idx = np.argpartition(sims, -2, axis=0)[-2:]   # (2, N)
+    top1_idx = top2_idx[1]
+    top2_idx = top2_idx[0]
+    top1_sim = sims[top1_idx, np.arange(n)]
+    top2_sim = sims[top2_idx, np.arange(n)]
+
+    # 3. 模糊消歧：主字体 top1 与 top2 过于接近时，用辅助字体（simhei）二次确认。
+    #    例：门 —— noto 误配「闪」(0.795)、次「问」(0.735)，差仅 0.06，被判定模糊；
+    #    simhei 对「门」置信度 0.805 更高，故采纳「门」，且不影响学(0.929)/兴(0.937) 这类高置信度匹配。
+    sec_chars, sec_matrix = _load_secondary_library()
+    sec_sims: Optional[np.ndarray] = None
+    fuzzy = (top1_sim - top2_sim) < _MARGIN
+    if sec_matrix is not None and bool(np.any(fuzzy)):
+        sec_sims = sec_matrix @ char_matrix.T           # (3755, N)
 
     mapping: Dict[int, str] = {}
     for i, cp in enumerate(valid_targets):
-        if best_sim[i] < _MIN_COSINE:
+        idx = int(top1_idx[i])
+        sim = float(top1_sim[i])
+        char = std_chars[idx]
+        if sec_sims is not None and fuzzy[i]:
+            s_idx = int(np.argmax(sec_sims[:, i]))
+            s_sim = float(sec_sims[s_idx, i])
+            if s_sim > sim:                             # 辅助字体置信度更高则采纳
+                char = sec_chars[s_idx]
+                sim = s_sim
+        if sim < _MIN_COSINE:
             continue                                    # 匹配不可靠，保留原字符
-        mapping[cp] = std_chars[int(best_idx[i])]
+        mapping[cp] = char
 
     return mapping
 
