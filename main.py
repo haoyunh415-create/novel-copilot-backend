@@ -1255,45 +1255,10 @@ def qidian_decode(req: QidianDecodeRequest, user=Depends(get_user)):
     if not allowed:
         return fail(f"请求太频繁，请 {retry} 秒后再试")
 
-    # 诊断日志（排查起点解密是否生效，定位后移除）
-    logging.getLogger("qidian_decode").warning(
-        "解密请求：%d 个字体 URL=%r；%d 个 blob 字体；原文(%d字)前40=%r",
-        len(req.fonts or []), (req.fonts or [])[:3], len(req.blob_fonts or []),
-        len(req.text or ""), (req.text or "")[:40],
-    )
-    if req.blob_debug:
-        logging.getLogger("qidian_decode").warning("blob 诊断：%r", req.blob_debug)
-
-    # 诊断：保存每个 blob 字体的原始字节 + magic，便于 SSH 回读定位生僻字/兼容区字体（定位后移除）
-    try:
-        for i, b64 in enumerate(req.blob_fonts or []):
-            raw = base64.b64decode(b64)
-            with open(f"/tmp/qidian_blob_{i}.bin", "wb") as f:
-                f.write(raw)
-            logging.getLogger("qidian_decode").warning(
-                "blob[%d] 大小=%d magic=%s 是否woff2=%s", i, len(raw), raw[:8].hex(),
-                raw[:4] == b"wOF2",
-            )
-    except Exception as e:
-        logging.getLogger("qidian_decode").warning("保存 blob 字节失败：%s", e)
-
     try:
         decoded = decode_qidian(req.text, req.fonts, req.blob_fonts)
     except Exception as e:
         return fail(f"解密失败：{e}")
-
-    changed = bool(decoded and decoded != req.text)
-    logging.getLogger("qidian_decode").warning(
-        "解密结果：changed=%s；明文(%d字)前40=%r", changed, len(decoded or ""), (decoded or "")[:40],
-    )
-    # 诊断：完整原文/明文落到文件，便于 SSH 回读核对正文解密质量（定位后移除）
-    try:
-        with open("/tmp/qidian_decode_in.txt", "w", encoding="utf-8") as f:
-            f.write(req.text or "")
-        with open("/tmp/qidian_decode_out.txt", "w", encoding="utf-8") as f:
-            f.write(decoded or "")
-    except Exception:
-        pass
 
     if not decoded or decoded == req.text:
         return fail("未匹配到任何字体映射，请确认正文为起点字体加密页面")
