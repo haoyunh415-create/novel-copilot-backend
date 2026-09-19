@@ -3240,7 +3240,7 @@
     document.documentElement.appendChild(st);
   }
 
-  // 弹出章节勾选面板：解析目录 → 排序 → 默认勾选最新 N 章 → 用户勾选 → 确认后建任务
+  // 弹出章节勾选面板：解析目录 → 排序 → 用户勾选 → 确认后建任务
   function showBatchChapterPicker(all) {
     var oldMask = document.getElementById("jl-batch-picker-mask");
     if (oldMask) oldMask.remove();
@@ -3259,9 +3259,8 @@
     for (var i = sorted.length - defaultCount; i < sorted.length; i++) {
       defaultSet[sorted[i].source_url] = true;
     }
-    // 勾选状态以 source_url 为键维护，切换正序/倒序不丢勾选
+    // 勾选状态以 source_url 为键维护，切换正序/倒序不丢勾选；默认不勾选，由用户自行勾选
     var checkedSet = {};
-    for (var k in defaultSet) checkedSet[k] = true;
     var desc = localStorage.getItem("JL_Batch_Order") !== "asc"; // 默认倒序（最新在前）
 
     ensureBatchPickerStyle();

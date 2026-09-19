@@ -305,7 +305,7 @@ JSON 结构：
         return _normalize_result(parsed, raw)
 
     try:
-        return _parse_once(text, max_tok=4096, temp=0.2)
+        return _parse_once(text, max_tok=4096, temp=0.1)
     except RuntimeError as first_err:
         # AI 偶发返回空/不可解析内容（安全过滤或截断）
         if "返回内容异常" not in str(first_err):
@@ -343,7 +343,7 @@ def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = Tru
         if spoiler_free else ""
     )
 
-    def _try_summary(text_input: str, max_tok: int, temp: float = 0.2) -> tuple:
+    def _try_summary(text_input: str, max_tok: int, temp: float = 0.1) -> tuple:
         """单次摘要调用，返回 (summary_text, finish_reason, is_empty)"""
         prompt = f"""章节标题：{chapter_title}。{spoiler_rule}
 {summary_rule}
@@ -439,7 +439,7 @@ JSON 格式：{{"characters":[{{"name":"","note":""}}],"foreshadowing":[{{"clue"
         return result
 
     try:
-        return _parse_once(text_input, max_tok=4096, temp=0.2)
+        return _parse_once(text_input, max_tok=4096, temp=0.1)
     except Exception as first_err:
         logging.warning("analyze_details_only: first attempt failed: %s", str(first_err)[:200])
         # 重试一次：更短文本 + 稍高温度，绕过可能的截断 / 内容安全过滤
@@ -509,7 +509,7 @@ JSON 结构：
                     {"role": "system", "content": "你是一个专业的小说分析助手，只返回符合要求的 JSON，不输出任何其他内容。"},
                     {"role": "user", "content": prompt},
                 ],
-                "temperature": 0.2,
+                "temperature": 0.1,
                 "stream": True,
                 "max_tokens": 4096,
             },

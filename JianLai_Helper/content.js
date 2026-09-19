@@ -322,6 +322,40 @@
     var blobFonts = blobResult.blobs;
     var blobDebug = blobResult.debug;
 
+    // 诊断：dump 页面所有 @font-face（family + src）与 document.fonts，定位兼容区字体位置
+    try {
+      var ffDiag = { fontFaces: [], cssFontFaces: [] };
+      if (document.fonts && document.fonts.forEach) {
+        document.fonts.forEach(function (ff) {
+          try { ffDiag.fontFaces.push(ff.family + ":" + ff.status); } catch (e) {}
+        });
+      }
+      for (var s = 0; s < document.styleSheets.length; s++) {
+        var rules;
+        try { rules = document.styleSheets[s].cssRules; } catch (_) { continue; }
+        for (var r = 0; r < rules.length; r++) {
+          var rule = rules[r];
+          if (rule.type !== 5) continue; // CSSRule.FONT_FACE_RULE
+          try {
+            ffDiag.cssFontFaces.push(
+              rule.style.getPropertyValue("font-family") + " => " +
+              rule.style.getPropertyValue("src")
+            );
+          } catch (e) {}
+        }
+      }
+      // 内联 <style> 里的 @font-face 也 dump 出来（blob 字体常在这里）
+      try {
+        document.querySelectorAll("style").forEach(function (st) {
+          var h = st.textContent || "";
+          var mm = h.match(/@font-face[^}]*}/g);
+          if (mm) ffDiag.cssFontFaces.push("STYLE: " + mm.join(" | "));
+        });
+      } catch (e) {}
+      console.log("[鉴来助手][字体诊断]", ffDiag);
+      blobDebug.push({ size: 0, magic: "fontface-diag", text: JSON.stringify(ffDiag).slice(0, 3000), isFont: false, err: "" });
+    } catch (e) {}
+
     console.log("[鉴来助手][起点解密] 提取到 " + urls.length + " 个字体 URL、" +
       blobFonts.length + " 个 blob 字体", urls, blobUrls, blobDebug);
     if (!urls.length && !blobFonts.length) {
@@ -2968,7 +3002,7 @@
     document.documentElement.appendChild(st);
   }
 
-  // 弹出章节勾选面板：解析目录 → 排序 → 默认勾选最新 N 章 → 用户勾选 → 确认后建任务
+  // 弹出章节勾选面板：解析目录 → 排序 → 用户勾选 → 确认后建任务
   function showBatchChapterPicker(all) {
     var oldMask = document.getElementById("jl-batch-picker-mask");
     if (oldMask) oldMask.remove();
@@ -2987,9 +3021,8 @@
     for (var i = sorted.length - defaultCount; i < sorted.length; i++) {
       defaultSet[sorted[i].source_url] = true;
     }
-    // 勾选状态以 source_url 为键维护，切换正序/倒序不丢勾选
+    // 勾选状态以 source_url 为键维护，切换正序/倒序不丢勾选；默认不勾选，由用户自行勾选
     var checkedSet = {};
-    for (var k in defaultSet) checkedSet[k] = true;
     var desc = localStorage.getItem("JL_Batch_Order") !== "asc"; // 默认倒序（最新在前）
 
     ensureBatchPickerStyle();
