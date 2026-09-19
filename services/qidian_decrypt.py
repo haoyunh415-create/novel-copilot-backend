@@ -34,6 +34,11 @@ from PIL import Image, ImageDraw, ImageFont
 # 依次尝试；服务器部署时可用 fonts-noto-cjk 或文泉驿，或设 QIDIAN_STD_FONT 指定。
 _STD_FONT_CANDIDATES = [
     os.environ.get("QIDIAN_STD_FONT", ""),   # 环境变量优先（服务器部署可指定路径）
+    # 起点错位字体是「阅文黑体 YWHeiTi」（Fontello svg2ttf 生成），笔画风格最接近
+    # 中易黑体 simhei，而不是 Noto。用 Noto 会系统性把「门」误配成「闪」等形近字，
+    # 用 simhei 则可正确区分。故把 simhei 放在 Noto 之前。
+    "/opt/novel-copilot-backend/fonts/simhei.ttf",  # 服务器部署（scp 上传）
+    "/usr/share/fonts/truetype/simhei.ttf",
     "C:/Windows/Fonts/simhei.ttf",           # Windows 黑体
     "C:/Windows/Fonts/msyh.ttc",             # Windows 微软雅黑
     "C:/Windows/Fonts/simsun.ttc",           # Windows 宋体
