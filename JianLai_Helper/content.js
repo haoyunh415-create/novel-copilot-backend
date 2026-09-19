@@ -226,6 +226,63 @@
     });
   }
 
+  // 提取 blob: 字体 URL。起点把生僻字（CJK 扩展 A / 兼容表意文字）放在一个 blob:
+  // 地址的第二个字体里，主字体 fixed.xxx.woff2 只覆盖常用字。blob: 是页面内存里的
+  // 对象，服务器 fetch 不到，只能由浏览器抓字节后发回后端解码。
+  function getBlobFontUrls() {
+    var urls = [];
+    var seen = {};
+    function add(u) {
+      u = (u || "").trim().replace(/^url\(["']?/, "").replace(/["']?\)$/, "");
+      if (u.indexOf("blob:") !== 0) return;
+      if (!seen[u]) { seen[u] = 1; urls.push(u); }
+    }
+    // 1. 扫描内联 <style> 标签（blob 字体常由 JS 动态注入到这里）
+    try {
+      document.querySelectorAll("style").forEach(function (st) {
+        var html = st.textContent || "";
+        var m = html.match(/url\(["']?(blob:[^"')]+)["']?\)/g);
+        if (m) for (var i = 0; i < m.length; i++) add(m[i]);
+      });
+    } catch (_) {}
+    // 2. 遍历 @font-face 规则
+    try {
+      for (var s = 0; s < document.styleSheets.length; s++) {
+        var rules;
+        try { rules = document.styleSheets[s].cssRules; } catch (_) { continue; }
+        for (var r = 0; r < rules.length; r++) {
+          var rule = rules[r];
+          if (rule.type !== 5) continue; // CSSRule.FONT_FACE_RULE
+          var src = rule.style && rule.style.getPropertyValue("src");
+          if (!src) continue;
+          var m = src.match(/url\(["']?(blob:[^"')]+)["']?\)/g);
+          if (m) for (var i = 0; i < m.length; i++) add(m[i]);
+        }
+      }
+    } catch (_) {}
+    return urls;
+  }
+
+  // 把 blob: 字体 fetch 成字节 → base64（发送给后端解码生僻字）
+  async function fetchBlobFonts(blobUrls) {
+    var blobs = [];
+    for (var i = 0; i < blobUrls.length; i++) {
+      try {
+        var resp = await fetch(blobUrls[i]);
+        if (!resp.ok) continue;
+        var buf = await resp.arrayBuffer();
+        var bytes = new Uint8Array(buf);
+        var binary = "";
+        var chunk = 0x8000; // 分块拼接，避免超长字符串导致栈溢出
+        for (var j = 0; j < bytes.length; j += chunk) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(j, j + chunk));
+        }
+        blobs.push(btoa(binary));
+      } catch (_) {}
+    }
+    return blobs;
+  }
+
   async function tryDecodeQidian(text, API, token) {
     var urls = getQidianFontUrls();
     try {
@@ -235,8 +292,12 @@
       }
     } catch (_) {}
 
-    console.log("[鉴来助手][起点解密] 提取到 " + urls.length + " 个字体 URL", urls);
-    if (!urls.length) {
+    var blobUrls = getBlobFontUrls();
+    var blobFonts = await fetchBlobFonts(blobUrls);
+
+    console.log("[鉴来助手][起点解密] 提取到 " + urls.length + " 个字体 URL、" +
+      blobFonts.length + " 个 blob 字体", urls, blobUrls);
+    if (!urls.length && !blobFonts.length) {
       console.warn("[鉴来助手][起点解密] 未提取到字体 URL，跳过（旧章节无加密字体，或字体未加载）");
       return text;
     }
@@ -247,7 +308,7 @@
           "Content-Type": "application/json",
           "Authorization": "Bearer " + token
         },
-        body: JSON.stringify({ text: text, fonts: urls })
+        body: JSON.stringify({ text: text, fonts: urls, blob_fonts: blobFonts })
       });
       var data = await resp.json();
       if (data && data.success && data.data && data.data.decoded_text) {

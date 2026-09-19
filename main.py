@@ -469,6 +469,7 @@ class AnalyzeRequest(BaseModel):
 class QidianDecodeRequest(BaseModel):
     text: str = Field(min_length=1, max_length=60000)
     fonts: List[str] = Field(default_factory=list, max_length=20)
+    blob_fonts: List[str] = Field(default_factory=list, max_length=20)
 
 
 class BatchChapterItem(BaseModel):
@@ -1254,12 +1255,13 @@ def qidian_decode(req: QidianDecodeRequest, user=Depends(get_user)):
 
     # 诊断日志（排查起点解密是否生效，定位后移除）
     logging.getLogger("qidian_decode").warning(
-        "解密请求：%d 个字体 URL=%r；原文(%d字)前40=%r",
-        len(req.fonts or []), (req.fonts or [])[:3], len(req.text or ""), (req.text or "")[:40],
+        "解密请求：%d 个字体 URL=%r；%d 个 blob 字体；原文(%d字)前40=%r",
+        len(req.fonts or []), (req.fonts or [])[:3], len(req.blob_fonts or []),
+        len(req.text or ""), (req.text or "")[:40],
     )
 
     try:
-        decoded = decode_qidian(req.text, req.fonts)
+        decoded = decode_qidian(req.text, req.fonts, req.blob_fonts)
     except Exception as e:
         return fail(f"解密失败：{e}")
 

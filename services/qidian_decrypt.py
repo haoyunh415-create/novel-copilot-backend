@@ -17,6 +17,7 @@
 仅用于学习研究 / 辅助已购内容阅读，请遵守目标平台服务条款。
 """
 
+import base64
 import hashlib
 import io
 import logging
@@ -210,21 +211,44 @@ def _apply_mapping(text: str, mapping: Dict[int, str]) -> str:
     return "".join(out)
 
 
-def decode_qidian(text: str, font_urls: List[str], timeout: int = 15) -> str:
+def decode_qidian(
+    text: str,
+    font_urls: Optional[List[str]] = None,
+    font_blobs: Optional[List[str]] = None,
+    timeout: int = 15,
+) -> str:
     """解密起点乱码正文。
 
     Args:
         text: 从页面 innerText 读到的乱码正文。
-        font_urls: 页面加载的字体文件 URL 列表（前端从 @font-face 提取）。
+        font_urls: 页面加载的字体文件 URL 列表（前端从 @font-face 提取，可下载）。
+        font_blobs: 前端从 blob: 字体抓取的字体字节（base64 编码）。起点把生僻字
+            （CJK 扩展 A / 兼容表意文字）放在一个 blob: 地址的第二个字体里，服务器
+            抓不到 blob:，只能由浏览器抓字节后传上来。
 
     Returns:
         解密后的明文（解密失败的字保留原字符，不影响其余部分）。
     """
-    if not text or not font_urls:
+    font_urls = font_urls or []
+    font_blobs = font_blobs or []
+    if not text or (not font_urls and not font_blobs):
         return text
 
     codepoints = {ord(ch) for ch in text}
     merged: Dict[int, str] = {}
+
+    def _merge_font(font_bytes: bytes, source: str) -> None:
+        digest = hashlib.sha1(font_bytes).hexdigest()
+        if digest in _mapping_cache:
+            mapping = _mapping_cache[digest]
+        else:
+            try:
+                mapping = build_mapping(font_bytes, codepoints=codepoints)
+            except Exception as e:
+                logger.warning("字体字形匹配失败 %s (%d bytes): %s", source, len(font_bytes), e)
+                mapping = {}
+            _mapping_cache[digest] = mapping
+        merged.update(mapping)
 
     for url in font_urls:
         if not url or not url.strip():
@@ -235,19 +259,17 @@ def decode_qidian(text: str, font_urls: List[str], timeout: int = 15) -> str:
         except Exception as e:
             logger.warning("下载字体失败 %s: %s", url, e)
             continue
+        _merge_font(font_bytes, url)
 
-        digest = hashlib.sha1(font_bytes).hexdigest()
-        if digest in _mapping_cache:
-            mapping = _mapping_cache[digest]
-        else:
-            try:
-                mapping = build_mapping(font_bytes, codepoints=codepoints)
-            except Exception as e:
-                logger.warning("字体字形匹配失败 %s (%d bytes): %s", url, len(font_bytes), e)
-                mapping = {}
-            _mapping_cache[digest] = mapping
-
-        merged.update(mapping)
+    for b64 in font_blobs:
+        if not b64:
+            continue
+        try:
+            font_bytes = base64.b64decode(b64)
+        except Exception as e:
+            logger.warning("blob 字体 base64 解码失败: %s", e)
+            continue
+        _merge_font(font_bytes, "blob")
 
     if merged:
         logger.info("解密完成：%d 个码点映射，原文 %d 字", len(merged), len(text))
