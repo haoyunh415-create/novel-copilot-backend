@@ -1,4 +1,4 @@
-# 🔗 Chrome Web Store 上架清单 v2.3.11
+# 🔗 Chrome Web Store 上架清单 v2.3.17
 
 > 打开 [Chrome Web Store 开发者后台](https://chrome.google.com/webstore/devconsole) → 找到「鉴来助手」→ 修改商品信息
 
@@ -6,9 +6,9 @@
 
 ## 📦 上传文件
 
-**插件 ZIP 包：** `jianlai-helper-v2.3.11.zip`（已生成，约 194KB）
+**插件 ZIP 包：** `jianlai-helper-v2.3.17.zip`（已生成，约 201KB，10 文件）
 
-路径：`C:\Users\32639\novel-copilot-backend\jianlai-helper-v2.3.11.zip`
+路径：`C:\Users\32639\novel-copilot-backend\static\jianlai-helper-v2.3.17.zip`
 
 ---
 
@@ -135,7 +135,7 @@ AI 自动追踪小说伏笔、生成人物关系图、无剧透前情提要。�
 
 1. 打开 https://chrome.google.com/webstore/devconsole
 2. 找到「鉴来助手 - 小说 AI 伏笔雷达」
-3. **Package** → Upload new package → 选择 `jianlai-helper-v2.3.11.zip`
+3. **Package** → Upload new package → 选择 `jianlai-helper-v2.3.17.zip`
 4. **Store listing** → 按本文档更新名称/说明/截图
 5. **Privacy** → 确认隐私政策 URL 正确
 6. **Submit for review** → 提交审核
