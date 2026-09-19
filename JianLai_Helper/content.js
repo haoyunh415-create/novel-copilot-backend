@@ -1302,23 +1302,7 @@
     }
     lastCallTime = now;
 
-    let text = getChapterText();
-    if (globalThis.JLBatchParser && globalThis.JLBatchParser.isPaywall(document.body.innerText || "")) {
-      setText("#jl-summary", "🔒 疑似付费/会员章节，已跳过（未扣额度）。开通会员后可继续阅读，或换其它免费章节分析。");
-      return;
-    }
-    if (text.length < 80) {
-      setText("#jl-summary", isFanqieSite()
-        ? "⚠️ 番茄小说正文已加密，暂无法自动分析。\n\n请手动复制本章正文后粘贴重试，或换起点等其它网站。"
-        : "⚠️ 本章正文解析失败，可能是起点反爬保护。\n\n等一下再试，或试试别的章节/网站。");
-      return;
-    }
-
-    // 起点错位字体解密：还原被动态字体错位的正文（旧章节无加密字体时自动跳过）
-    if (isQidianSite()) {
-      text = await tryDecodeQidian(text, API, token);
-    }
-
+    // 立即进入「运行中」状态并禁用按钮，避免起点解密（约 6 秒）期间重复点击触发「操作频繁」
     isRunning = true;
     const runBtn = document.getElementById("jl-run");
     runBtn.disabled = true;
@@ -1340,6 +1324,23 @@
     }
 
     try {
+      let text = getChapterText();
+      if (globalThis.JLBatchParser && globalThis.JLBatchParser.isPaywall(document.body.innerText || "")) {
+        setText("#jl-summary", "🔒 疑似付费/会员章节，已跳过（未扣额度）。开通会员后可继续阅读，或换其它免费章节分析。");
+        return;
+      }
+      if (text.length < 80) {
+        setText("#jl-summary", isFanqieSite()
+          ? "⚠️ 番茄小说正文已加密，暂无法自动分析。\n\n请手动复制本章正文后粘贴重试，或换起点等其它网站。"
+          : "⚠️ 本章正文解析失败，可能是起点反爬保护。\n\n等一下再试，或试试别的章节/网站。");
+        return;
+      }
+
+      // 起点错位字体解密：还原被动态字体错位的正文（旧章节无加密字体时自动跳过）
+      if (isQidianSite()) {
+        text = await tryDecodeQidian(text, API, token);
+      }
+
       const chapterTitle = getChapterTitle();
       setText("#jl-heading", chapterTitle);
       setText("#jl-summary", "🔗 正在连接 AI 服务…");
