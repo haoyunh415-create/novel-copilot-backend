@@ -1362,12 +1362,12 @@
         return;
       }
 
-      // 起点「错位字体」：实测 innerText 已是明文（该字体只影响屏幕渲染/截图防 OCR，
-      // 不改 DOM 文本），解密反而会把明文搅乱成乱码，故关闭。若未来遇到真正乱码的起点
-      // 章节，再启用下方解密逻辑。
-      // if (isQidianSite()) {
-      //   text = await tryDecodeQidian(text, API, token);
-      // }
+      // 起点「错位字体」：正文 DOM 是乱码（innerText 读到错位后的字），必须解密还原成明文。
+      // 标题/作者/字数等页面框架是明文、无需解密（getChapterTitle 单独取）。
+      // 之前误判「解密搅乱明文」是因为正文没抓到、抓到的全是明文标题；现已修正正文抓取。
+      if (isQidianSite()) {
+        text = await tryDecodeQidian(text, API, token);
+      }
 
       const chapterTitle = getChapterTitle();
       setText("#jl-heading", chapterTitle);
