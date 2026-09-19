@@ -1858,7 +1858,7 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                     import logging
                     logging.warning("analyze_progressive: summary call failed for user=%s: %s", user[:16] if len(user) > 16 else user, str(e)[:200])
                     err_msg = str(e)
-                    if "安全过滤" in err_msg or "内容安全" in err_msg:
+                    if "内容安全" in err_msg or "生僻字" in err_msg or "乱码" in err_msg:
                         summary = {"summary": f"⚠️ {err_msg[:200]}"}
                     else:
                         summary = {"summary": f"AI 服务暂时不可用，请稍后重试。{_other_modes_hint(req.detail_level)}持续失败请联系客服 QQ：2313370765"}

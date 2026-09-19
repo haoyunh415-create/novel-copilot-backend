@@ -27,7 +27,7 @@ _session.mount("http://", _adapter)
 
 API_KEY = os.getenv("DEEPSEEK_API_KEY")
 API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
-MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 # —— Token 用量统计（量化「分级汇总 vs 整书一次性注入」用）——
 _USAGE_STATS = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "calls": 0}
@@ -371,9 +371,16 @@ def analyze_summary_only(text: str, chapter_title: str, spoiler_free: bool = Tru
             summary, finish, is_empty = _try_summary(short_text, max_tok=3072, temp=0.5)
 
     if is_empty:
+        # 区分两类「空响应」：真内容安全过滤 vs 模型对生僻字/乱码正文无法生成有效内容
+        if finish == "content_filter":
+            raise RuntimeError(
+                "AI 内容安全过滤触发（本章可能含敏感内容），"
+                "建议：1) 稍后重试 2) 切换为「简洁」模式再试 3) 跳过本章分析下一章"
+            )
+        # finish_reason 为 "length"（被 max_tokens 截断但内容为空）或其它：多为正文含生僻字/乱码
         raise RuntimeError(
-            "AI 内容安全过滤触发（本章可能含敏感内容），"
-            "建议：1) 稍后重试 2) 切换为「简洁」模式再试 3) 跳过本章分析下一章"
+            "AI 未能生成摘要（正文可能含较多生僻字或乱码），"
+            "建议：1) 稍后重试 2) 切换为「简洁」模式再试 3) 手动复制正文后重试"
         )
 
     # 检测截断：finish_reason 为 "length" 说明被 max_tokens 截断
