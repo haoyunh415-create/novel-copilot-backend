@@ -52,6 +52,9 @@
       ".txt", ".text", ".novel-content", ".book-content",
       ".chapter-wrapper", ".print",
       "article", ".entry-content", "#article", "#text",
+      // 起点新版（沐野）阅读器正文容器
+      ".muye-reader-content", ".muye-reader-text", ".muye-reader-body",
+      ".muye-reader-main", ".reader-content", ".j_readContent", ".text-content",
     ];
     let bestText = "";
     for (const sel of containerSelectors) {
@@ -64,6 +67,26 @@
         .join("\n");
       if (text.length > bestText.length) bestText = text;
     }
+
+    // 兜底：已知容器都没命中时，取页面上「中文占比高、且不被单个子元素主导」的最长文本块
+    if (bestText.length < 200) {
+      var nodes = document.querySelectorAll("main, article, section, div");
+      for (var i = 0; i < nodes.length; i++) {
+        var el = nodes[i];
+        var t = (el.innerText || "").trim();
+        if (t.length < 300 || t.length <= bestText.length) continue;
+        var cn = (t.match(/[一-鿿㐀-䶿]/g) || []).length;
+        if (cn / t.length < 0.4) continue;  // 中文占比过低，跳过导航/书单等
+        var dominated = false;               // 被单个子元素主导说明是父容器，下沉到更具体节点
+        for (var j = 0; j < el.children.length; j++) {
+          if ((el.children[j].innerText || "").trim().length > t.length * 0.6) { dominated = true; break; }
+        }
+        if (dominated) continue;
+        bestText = t;
+      }
+    }
+
+    // 再兜底：所有 <p>（原有逻辑）
     if (bestText.length < 80) {
       const allP = document.querySelectorAll("p");
       const texts = Array.from(allP)
@@ -98,6 +121,9 @@
       _cachedTextUrl = location.href;
       return "";
     }
+
+    // 诊断日志：确认正文抓取是否命中正文容器（排查起点新版阅读器抓不到正文）
+    console.log("[鉴来助手][正文抓取] 长度=" + bestText.length + " 前80=" + JSON.stringify(bestText.slice(0, 80)));
 
     const lines = bestText.split("\n").filter((l) => l.length > 3);
     _cachedText = lines.slice(0, 150).join("\n");
