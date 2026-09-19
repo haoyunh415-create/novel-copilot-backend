@@ -19,6 +19,7 @@
 
 import hashlib
 import io
+import logging
 import os
 import threading
 from typing import Dict, List, Optional, Tuple
@@ -61,6 +62,8 @@ _std_font: Optional[ImageFont.FreeTypeFont] = None
 _std_chars: List[str] = []
 _std_matrix: Optional[np.ndarray] = None      # (N, _CANVAS*_CANVAS) float32 单位向量
 _mapping_cache: Dict[str, Dict[int, str]] = {}  # 字体 sha1 → {码点: 真实字}
+
+logger = logging.getLogger("qidian_decrypt")
 
 
 def _gb2312_level1_chars() -> List[str]:
@@ -217,7 +220,8 @@ def decode_qidian(text: str, font_urls: List[str], timeout: int = 15) -> str:
         url = url.strip().strip("\"'")
         try:
             font_bytes = download_font(url, timeout=timeout)
-        except Exception:
+        except Exception as e:
+            logger.warning("下载字体失败 %s: %s", url, e)
             continue
 
         digest = hashlib.sha1(font_bytes).hexdigest()
@@ -226,10 +230,13 @@ def decode_qidian(text: str, font_urls: List[str], timeout: int = 15) -> str:
         else:
             try:
                 mapping = build_mapping(font_bytes, codepoints=codepoints)
-            except Exception:
+            except Exception as e:
+                logger.warning("字体字形匹配失败 %s (%d bytes): %s", url, len(font_bytes), e)
                 mapping = {}
             _mapping_cache[digest] = mapping
 
         merged.update(mapping)
 
+    if merged:
+        logger.info("解密完成：%d 个码点映射，原文 %d 字", len(merged), len(text))
     return _apply_mapping(text, merged)

@@ -169,9 +169,43 @@
     return urls;
   }
 
+  // 用缓冲 PerformanceObserver 兜底抓字体 URL（resource 计时缓冲区有上限，字体可能被挤出）
+  function getBufferedFontUrls() {
+    return new Promise(function (resolve) {
+      var found = [];
+      if (!window.PerformanceObserver) { resolve(found); return; }
+      var po;
+      try {
+        po = new PerformanceObserver(function (list) {
+          list.getEntries().forEach(function (e) {
+            if (e.name && (e.initiatorType === "font" || /font-antipirate/.test(e.name))) {
+              found.push(e.name);
+            }
+          });
+          po.disconnect();
+          resolve(found);
+        });
+        po.observe({ type: "resource", buffered: true });
+      } catch (e) {
+        resolve(found);
+      }
+    });
+  }
+
   async function tryDecodeQidian(text, API, token) {
     var urls = getQidianFontUrls();
-    if (!urls.length) return text;
+    try {
+      var buffered = await getBufferedFontUrls();
+      for (var i = 0; i < buffered.length; i++) {
+        if (urls.indexOf(buffered[i]) < 0) urls.push(buffered[i]);
+      }
+    } catch (_) {}
+
+    console.log("[鉴来助手][起点解密] 提取到 " + urls.length + " 个字体 URL", urls);
+    if (!urls.length) {
+      console.warn("[鉴来助手][起点解密] 未提取到字体 URL，跳过（旧章节无加密字体，或字体未加载）");
+      return text;
+    }
     try {
       var resp = await fetch(API + "/api/qidian/decode", {
         method: "POST",
@@ -183,10 +217,13 @@
       });
       var data = await resp.json();
       if (data && data.success && data.data && data.data.decoded_text) {
-        return data.data.decoded_text;
+        var decoded = data.data.decoded_text;
+        console.log("[鉴来助手][起点解密] 成功：原文 " + text.length + " 字 → 明文 " + decoded.length + " 字");
+        return decoded;
       }
+      console.warn("[鉴来助手][起点解密] 后端返回失败:", data && data.error ? data.error : data);
     } catch (e) {
-      console.warn("[鉴来助手] 起点字体解密失败", e);
+      console.warn("[鉴来助手][起点解密] 请求异常", e);
     }
     return text;
   }
