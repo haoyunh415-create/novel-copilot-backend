@@ -1,6 +1,7 @@
 ﻿import asyncio
 import hashlib
 import json
+import logging
 import os
 import random
 import secrets
@@ -1251,10 +1252,21 @@ def qidian_decode(req: QidianDecodeRequest, user=Depends(get_user)):
     if not allowed:
         return fail(f"请求太频繁，请 {retry} 秒后再试")
 
+    # 诊断日志（排查起点解密是否生效，定位后移除）
+    logging.getLogger("qidian_decode").warning(
+        "解密请求：%d 个字体 URL=%r；原文(%d字)前40=%r",
+        len(req.fonts or []), (req.fonts or [])[:3], len(req.text or ""), (req.text or "")[:40],
+    )
+
     try:
         decoded = decode_qidian(req.text, req.fonts)
     except Exception as e:
         return fail(f"解密失败：{e}")
+
+    changed = bool(decoded and decoded != req.text)
+    logging.getLogger("qidian_decode").warning(
+        "解密结果：changed=%s；明文(%d字)前40=%r", changed, len(decoded or ""), (decoded or "")[:40],
+    )
 
     if not decoded or decoded == req.text:
         return fail("未匹配到任何字体映射，请确认正文为起点字体加密页面")
