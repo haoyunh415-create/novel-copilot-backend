@@ -172,18 +172,30 @@ def build_mapping(font_bytes: bytes, codepoints: Optional[set] = None) -> Dict[i
     if codepoints is not None:
         targets = [cp for cp in targets if cp in codepoints]
 
-    mapping: Dict[int, str] = {}
+    # 1. 批量渲染所有目标字形（跳过无字形的码点）
+    vecs: List[np.ndarray] = []
+    valid_targets: List[int] = []
     for cp in targets:
-        ch = chr(cp)
-        vec = _render_vector(ch, pil_font)
+        vec = _render_vector(chr(cp), pil_font)
         if not np.any(vec):
             continue                                    # 无字形，跳过
+        vecs.append(vec)
+        valid_targets.append(cp)
 
-        sims = std_matrix @ vec                         # 余弦相似度（单位向量点积）
-        best_idx = int(np.argmax(sims))
-        if sims[best_idx] < _MIN_COSINE:
+    if not vecs:
+        return {}
+
+    # 2. 一次矩阵乘法算所有相似度（比逐字 matvec 快一个数量级）
+    char_matrix = np.stack(vecs).astype(np.float32)     # (N, _CANVAS*_CANVAS)
+    sims = std_matrix @ char_matrix.T                   # (3755, N) 余弦相似度
+    best_idx = np.argmax(sims, axis=0)                  # (N,)
+    best_sim = sims[best_idx, np.arange(len(best_idx))]  # (N,)
+
+    mapping: Dict[int, str] = {}
+    for i, cp in enumerate(valid_targets):
+        if best_sim[i] < _MIN_COSINE:
             continue                                    # 匹配不可靠，保留原字符
-        mapping[cp] = std_chars[best_idx]
+        mapping[cp] = std_chars[int(best_idx[i])]
 
     return mapping
 
