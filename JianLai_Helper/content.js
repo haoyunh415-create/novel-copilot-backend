@@ -50,6 +50,7 @@
       ".read-content", ".main-text-wrap", ".chapter-content",
       ".content", ".article-content", ".post-content",
       ".txt", ".text", ".novel-content", ".book-content",
+      ".chapter-wrapper", ".print",
       "article", ".entry-content", "#article", "#text",
     ];
     let bestText = "";
@@ -110,6 +111,84 @@
     } catch (_) {
       return false;
     }
+  }
+
+  function isQidianSite() {
+    try {
+      return /qidian\.com$/i.test(location.hostname);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ═══════════ 起点「错位字体」解密 ═══════════
+  // 起点把正文常用字错位，靠 qdfont.qidian.com/font-antipirate 的动态字体渲染回正确
+  // 字形，innerText 读到的是错位后的正常汉字码点——中文占比高、无 PUA，常规质量检测
+  // 拦不住。这里提取页面 @font-face 的字体 URL，交给后端 /api/qidian/decode 做字形还原。
+
+  function getQidianFontUrls() {
+    var urls = [];
+    var seen = {};
+    function add(u) {
+      u = (u || "").trim().replace(/^url\(["']?/, "").replace(/["']?\)$/, "");
+      if (u.indexOf("http") !== 0 || u.indexOf("blob:") === 0) return;
+      if (u.indexOf("font-antipirate") >= 0 && !seen[u]) {
+        seen[u] = 1;
+        urls.push(u);
+      }
+    }
+    // 1. 遍历 @font-face 规则（同源 stylesheet 可读；跨域抛错则跳过）
+    try {
+      for (var s = 0; s < document.styleSheets.length; s++) {
+        var rules;
+        try { rules = document.styleSheets[s].cssRules; } catch (_) { continue; }
+        for (var r = 0; r < rules.length; r++) {
+          var rule = rules[r];
+          if (rule.type !== 5) continue; // CSSRule.FONT_FACE_RULE
+          var src = rule.style && rule.style.getPropertyValue("src");
+          if (!src) continue;
+          var m = src.match(/url\(["']?([^"')]+)["']?\)/g);
+          if (m) for (var i = 0; i < m.length; i++) add(m[i]);
+        }
+      }
+    } catch (_) {}
+    // 2. 兜底：扫描内联 <style> 标签的 innerHTML（动态注入的字体规则常在这里）
+    try {
+      document.querySelectorAll("style").forEach(function (st) {
+        var html = st.textContent || "";
+        var m = html.match(/url\(["']?[^"')]*font-antipirate[^"')]*["']?\)/g);
+        if (m) for (var i = 0; i < m.length; i++) add(m[i]);
+      });
+    } catch (_) {}
+    // 3. 再兜底：从已加载资源里找字体 URL（FontFace API 动态注入时前两条都拿不到）
+    try {
+      performance.getEntriesByType("resource").forEach(function (res) {
+        if (/font-antipirate/.test(res.name)) add(res.name);
+      });
+    } catch (_) {}
+    return urls;
+  }
+
+  async function tryDecodeQidian(text, API, token) {
+    var urls = getQidianFontUrls();
+    if (!urls.length) return text;
+    try {
+      var resp = await fetch(API + "/api/qidian/decode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + token
+        },
+        body: JSON.stringify({ text: text, fonts: urls })
+      });
+      var data = await resp.json();
+      if (data && data.success && data.data && data.data.decoded_text) {
+        return data.data.decoded_text;
+      }
+    } catch (e) {
+      console.warn("[鉴来助手] 起点字体解密失败", e);
+    }
+    return text;
   }
 
   // ═══════════ 番茄小说字体解密 ═══════════
@@ -1186,7 +1265,7 @@
     }
     lastCallTime = now;
 
-    const text = getChapterText();
+    let text = getChapterText();
     if (globalThis.JLBatchParser && globalThis.JLBatchParser.isPaywall(document.body.innerText || "")) {
       setText("#jl-summary", "🔒 疑似付费/会员章节，已跳过（未扣额度）。开通会员后可继续阅读，或换其它免费章节分析。");
       return;
@@ -1196,6 +1275,11 @@
         ? "⚠️ 番茄小说正文已加密，暂无法自动分析。\n\n请手动复制本章正文后粘贴重试，或换起点等其它网站。"
         : "⚠️ 本章正文解析失败，可能是起点反爬保护。\n\n等一下再试，或试试别的章节/网站。");
       return;
+    }
+
+    // 起点错位字体解密：还原被动态字体错位的正文（旧章节无加密字体时自动跳过）
+    if (isQidianSite()) {
+      text = await tryDecodeQidian(text, API, token);
     }
 
     isRunning = true;

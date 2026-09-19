@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from services.ai_service import analyze_text
 from services.auth_service import hash_password as bcrypt_hash_password
 from services.auth_service import verify_password as bcrypt_verify_password
+from services.qidian_decrypt import decode_qidian
 
 
 def friendly_error(exc: Exception) -> str:
@@ -462,6 +463,11 @@ class AnalyzeRequest(BaseModel):
     book_title: Optional[str] = Field(default=None, max_length=200)
     author: Optional[str] = Field(default=None, max_length=200)
     chapter_index: Optional[int] = Field(default=None)
+
+
+class QidianDecodeRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=60000)
+    fonts: List[str] = Field(default_factory=list, max_length=20)
 
 
 class BatchChapterItem(BaseModel):
@@ -1237,6 +1243,22 @@ def analyze(req: AnalyzeRequest, user=Depends(get_user)):
         return fail(e.msg)
     except _AnalysisRejected as e:
         return fail(e.msg)
+
+
+@app.post("/api/qidian/decode")
+def qidian_decode(req: QidianDecodeRequest, user=Depends(get_user)):
+    allowed, retry = _check_rate_limit("analyze", user=user)
+    if not allowed:
+        return fail(f"请求太频繁，请 {retry} 秒后再试")
+
+    try:
+        decoded = decode_qidian(req.text, req.fonts)
+    except Exception as e:
+        return fail(f"解密失败：{e}")
+
+    if not decoded or decoded == req.text:
+        return fail("未匹配到任何字体映射，请确认正文为起点字体加密页面")
+    return ok({"decoded_text": decoded})
 
 
 @app.post("/api/analyze/batch/create")
