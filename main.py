@@ -1267,6 +1267,14 @@ def qidian_decode(req: QidianDecodeRequest, user=Depends(get_user)):
     logging.getLogger("qidian_decode").warning(
         "解密结果：changed=%s；明文(%d字)前40=%r", changed, len(decoded or ""), (decoded or "")[:40],
     )
+    # 诊断：完整原文/明文落到文件，便于 SSH 回读核对正文解密质量（定位后移除）
+    try:
+        with open("/tmp/qidian_decode_in.txt", "w", encoding="utf-8") as f:
+            f.write(req.text or "")
+        with open("/tmp/qidian_decode_out.txt", "w", encoding="utf-8") as f:
+            f.write(decoded or "")
+    except Exception:
+        pass
 
     if not decoded or decoded == req.text:
         return fail("未匹配到任何字体映射，请确认正文为起点字体加密页面")

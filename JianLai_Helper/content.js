@@ -56,43 +56,40 @@
       ".muye-reader-content", ".muye-reader-text", ".muye-reader-body",
       ".muye-reader-main", ".reader-content", ".j_readContent", ".text-content",
     ];
+    // 正文是一堆 <p> 段落；标题/作者/字数在 h1/h2/div 里，只取 <p> 天然排除它们
+    var _cn = (t) => (t.match(/[一-鿿㐀-䶿]/g) || []).length;
+    var _collectPs = (el) => Array.from(el.querySelectorAll("p"))
+      .map((p) => p.innerText?.trim() || "")
+      .filter((t) => t.length > 5)
+      .join("\n");
     let bestText = "";
+    let bestCn = 0;
     for (const sel of containerSelectors) {
       const container = document.querySelector(sel);
       if (!container) continue;
-      const paragraphs = container.querySelectorAll("p, div");
-      const text = Array.from(paragraphs)
-        .map((p) => p.innerText?.trim() || "")
-        .filter((t) => t.length > 5)
-        .join("\n");
-      if (text.length > bestText.length) bestText = text;
+      const text = _collectPs(container);
+      const cn = _cn(text);
+      if (cn > bestCn) { bestCn = cn; bestText = text; }
     }
 
-    // 兜底：已知容器都没命中时，取页面上「中文占比高、且不被单个子元素主导」的最长文本块
+    // 兜底：全局找「<p> 段落中文总量最大」的容器（至少 3 段），能抓全正文且不含标题
     if (bestText.length < 200) {
-      var nodes = document.querySelectorAll("main, article, section, div");
-      for (var i = 0; i < nodes.length; i++) {
-        var el = nodes[i];
-        var t = (el.innerText || "").trim();
-        if (t.length < 300 || t.length <= bestText.length) continue;
-        var cn = (t.match(/[一-鿿㐀-䶿]/g) || []).length;
-        if (cn / t.length < 0.4) continue;  // 中文占比过低，跳过导航/书单等
-        var dominated = false;               // 被单个子元素主导说明是父容器，下沉到更具体节点
-        for (var j = 0; j < el.children.length; j++) {
-          if ((el.children[j].innerText || "").trim().length > t.length * 0.6) { dominated = true; break; }
-        }
-        if (dominated) continue;
-        bestText = t;
-      }
+      document.querySelectorAll("main, article, section, div").forEach(function (el) {
+        var ps = el.querySelectorAll("p");
+        if (ps.length < 3) return;
+        var text = _collectPs(el);
+        var cn = _cn(text);
+        if (cn > bestCn) { bestCn = cn; bestText = text; }
+      });
     }
 
     // 再兜底：所有 <p>（原有逻辑）
     if (bestText.length < 80) {
       const allP = document.querySelectorAll("p");
-      const texts = Array.from(allP)
+      bestText = Array.from(allP)
         .map((p) => p.innerText?.trim() || "")
-        .filter((t) => t.length > 8);
-      bestText = texts.join("\n");
+        .filter((t) => t.length > 8)
+        .join("\n");
     }
     // 番茄小说字体解密：把 PUA 私用区码点还原成真实汉字（解密成功则后续质量检测正常通过）
     bestText = decodeFanqieText(bestText);
@@ -123,7 +120,18 @@
     }
 
     // 诊断日志：确认正文抓取是否命中正文容器（排查起点新版阅读器抓不到正文）
-    console.log("[鉴来助手][正文抓取] 长度=" + bestText.length + " 前80=" + JSON.stringify(bestText.slice(0, 80)));
+    var _pCount = document.querySelectorAll("p").length;
+    var _topEls = [];
+    try {
+      document.querySelectorAll("main, article, section, div").forEach(function (el) {
+        var t = (el.innerText || "").trim();
+        if (t.length < 200) return;
+        _topEls.push((el.className || el.tagName).toString().slice(0, 30) + ":" + t.length);
+      });
+      _topEls.sort(function (a, b) { return (parseInt(b.split(":")[1]) || 0) - (parseInt(a.split(":")[1]) || 0); });
+      _topEls = _topEls.slice(0, 8);
+    } catch (_) {}
+    console.log("[鉴来助手][正文抓取] 长度=" + bestText.length + " <p>总数=" + _pCount + " 前80=" + JSON.stringify(bestText.slice(0, 80)) + " 候选容器=" + JSON.stringify(_topEls));
 
     const lines = bestText.split("\n").filter((l) => l.length > 3);
     _cachedText = lines.slice(0, 150).join("\n");
