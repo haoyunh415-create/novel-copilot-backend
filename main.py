@@ -1,4 +1,5 @@
 ﻿import asyncio
+import base64
 import hashlib
 import json
 import logging
@@ -1262,6 +1263,19 @@ def qidian_decode(req: QidianDecodeRequest, user=Depends(get_user)):
     )
     if req.blob_debug:
         logging.getLogger("qidian_decode").warning("blob 诊断：%r", req.blob_debug)
+
+    # 诊断：保存每个 blob 字体的原始字节 + magic，便于 SSH 回读定位生僻字/兼容区字体（定位后移除）
+    try:
+        for i, b64 in enumerate(req.blob_fonts or []):
+            raw = base64.b64decode(b64)
+            with open(f"/tmp/qidian_blob_{i}.bin", "wb") as f:
+                f.write(raw)
+            logging.getLogger("qidian_decode").warning(
+                "blob[%d] 大小=%d magic=%s 是否woff2=%s", i, len(raw), raw[:8].hex(),
+                raw[:4] == b"wOF2",
+            )
+    except Exception as e:
+        logging.getLogger("qidian_decode").warning("保存 blob 字节失败：%s", e)
 
     try:
         decoded = decode_qidian(req.text, req.fonts, req.blob_fonts)
