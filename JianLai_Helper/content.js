@@ -263,24 +263,49 @@
     return urls;
   }
 
-  // 把 blob: 字体 fetch 成字节 → base64（发送给后端解码生僻字）
+  // 把 blob: 字体 fetch 成字节 → base64（发送给后端解码生僻字）。
+  // 同时返回每个 blob 的诊断信息（大小/magic/是否字体），供后端日志定位。
   async function fetchBlobFonts(blobUrls) {
     var blobs = [];
+    var debug = [];
     for (var i = 0; i < blobUrls.length; i++) {
+      var info = { size: -1, magic: "", text: "", isFont: false, err: "" };
       try {
         var resp = await fetch(blobUrls[i]);
-        if (!resp.ok) continue;
+        if (!resp.ok) { info.err = "resp not ok"; debug.push(info); continue; }
         var buf = await resp.arrayBuffer();
         var bytes = new Uint8Array(buf);
-        var binary = "";
-        var chunk = 0x8000; // 分块拼接，避免超长字符串导致栈溢出
-        for (var j = 0; j < bytes.length; j += chunk) {
-          binary += String.fromCharCode.apply(null, bytes.subarray(j, j + chunk));
+        info.size = bytes.length;
+        var hex = "";
+        for (var k = 0; k < Math.min(8, bytes.length); k++) hex += ("0" + bytes[k].toString(16)).slice(-2);
+        info.magic = hex;
+        // 若前 80 字节是可打印文本，dump 出来帮助判断 blob 到底装的是什么
+        var printable = true;
+        for (var k = 0; k < Math.min(80, bytes.length); k++) {
+          var c = bytes[k];
+          if (c < 0x20 && c !== 0x0a && c !== 0x0d && c !== 0x09) { printable = false; break; }
         }
-        blobs.push(btoa(binary));
-      } catch (_) {}
+        if (printable) {
+          info.text = String.fromCharCode.apply(null, bytes.subarray(0, Math.min(80, bytes.length)));
+        }
+        // 字体 magic：woff2=wOF2、otf=OTTO、ttf=00 01 00 00
+        var head4 = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
+        if (head4 === "wOF2" || head4 === "OTTO" ||
+            (bytes[0] === 0x00 && bytes[1] === 0x01 && bytes[2] === 0x00 && bytes[3] === 0x00)) {
+          info.isFont = true;
+          var binary = "";
+          var chunk = 0x8000; // 分块拼接，避免超长字符串导致栈溢出
+          for (var j = 0; j < bytes.length; j += chunk) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(j, j + chunk));
+          }
+          blobs.push(btoa(binary));
+        }
+      } catch (e) {
+        info.err = String(e && e.message ? e.message : e);
+      }
+      debug.push(info);
     }
-    return blobs;
+    return { blobs: blobs, debug: debug };
   }
 
   async function tryDecodeQidian(text, API, token) {
@@ -293,10 +318,12 @@
     } catch (_) {}
 
     var blobUrls = getBlobFontUrls();
-    var blobFonts = await fetchBlobFonts(blobUrls);
+    var blobResult = await fetchBlobFonts(blobUrls);
+    var blobFonts = blobResult.blobs;
+    var blobDebug = blobResult.debug;
 
     console.log("[鉴来助手][起点解密] 提取到 " + urls.length + " 个字体 URL、" +
-      blobFonts.length + " 个 blob 字体", urls, blobUrls);
+      blobFonts.length + " 个 blob 字体", urls, blobUrls, blobDebug);
     if (!urls.length && !blobFonts.length) {
       console.warn("[鉴来助手][起点解密] 未提取到字体 URL，跳过（旧章节无加密字体，或字体未加载）");
       return text;
@@ -308,7 +335,7 @@
           "Content-Type": "application/json",
           "Authorization": "Bearer " + token
         },
-        body: JSON.stringify({ text: text, fonts: urls, blob_fonts: blobFonts })
+        body: JSON.stringify({ text: text, fonts: urls, blob_fonts: blobFonts, blob_debug: blobDebug })
       });
       var data = await resp.json();
       if (data && data.success && data.data && data.data.decoded_text) {

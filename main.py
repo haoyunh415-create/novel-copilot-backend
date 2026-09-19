@@ -470,6 +470,7 @@ class QidianDecodeRequest(BaseModel):
     text: str = Field(min_length=1, max_length=60000)
     fonts: List[str] = Field(default_factory=list, max_length=20)
     blob_fonts: List[str] = Field(default_factory=list, max_length=20)
+    blob_debug: List[dict] = Field(default_factory=list, max_length=50)
 
 
 class BatchChapterItem(BaseModel):
@@ -1259,6 +1260,8 @@ def qidian_decode(req: QidianDecodeRequest, user=Depends(get_user)):
         len(req.fonts or []), (req.fonts or [])[:3], len(req.blob_fonts or []),
         len(req.text or ""), (req.text or "")[:40],
     )
+    if req.blob_debug:
+        logging.getLogger("qidian_decode").warning("blob 诊断：%r", req.blob_debug)
 
     try:
         decoded = decode_qidian(req.text, req.fonts, req.blob_fonts)
