@@ -31,7 +31,8 @@
       if (text && text.length >= 2 && text.length < 200) return text;
     }
     const title = document.title.trim();
-    const sep = title.lastIndexOf(" - ");
+    let sep = title.lastIndexOf(" - ");
+    if (sep < 0) sep = title.lastIndexOf("_");
     if (sep > 0) return title.substring(0, sep).trim();
     return title || "未命名章节";
   }
@@ -460,6 +461,8 @@
       "h1 a", "h2 a", ".book-info h1",
       ".crumbs a:last-of-type", ".breadcrumb a:last-of-type",
       ".book-detail h1", ".novel-info h1",
+      // 笔趣阁镜像目录页/章节页的书名容器
+      ".info h1", ".top h1", "#info h1", ".bookinfo h1", ".info h1 a",
     ];
     for (const sel of selectors) {
       const text = document.querySelector(sel)?.innerText?.trim();
@@ -474,6 +477,17 @@
       const tm = t.match(/^(.*?)(第\s*[0-9一二三四五六七八九十百千万零]+\s*[章节卷])/);
       if (tm) { const bt = tm[1].trim(); if (bt) return bt; }
       if (t && t.length < 100) return t;
+    }
+    // 笔趣阁（biquge/biquga 等镜像）兜底：目录页 "{书名}_笔趣阁" / "{书名}最新章节_笔趣阁"，章节页 "{章节}_{书名}-笔趣阁"
+    if (/biqu/i.test(location.hostname)) {
+      let t = (document.title || "")
+        .replace(/[-_]\s*(笔趣阁|笔趣阁无弹窗|笔趣阁手机版|無彈窗|无弹窗).*$/, "")
+        .replace(/(最新章节列表|最新章节|全部章节|章节目录|章节列表|全文阅读|无弹窗|在线阅读|免费阅读)\s*$/, "")
+        .trim();
+      // 章节页标题形如 "{章节}_{书名}"：取 "_" 之后的书名段
+      const segs = t.split("_");
+      if (segs.length > 1 && segs[segs.length - 1].trim()) t = segs[segs.length - 1].trim();
+      if (t && t.length >= 1 && t.length < 100) return t;
     }
     const m = location.pathname.match(/\/book\/([^/]+)/);
     if (m) return decodeURIComponent(m[1]);
@@ -3308,6 +3322,11 @@
     }
     var r = await fetchWithRetry(source_url, { credentials: "include" }, 2);
     var html = await r.text();
+    if (site === "biquge") {
+      // 笔趣阁 biquga 正文是 document.writeln(qsbs.bb('BASE64'))，先解码再提正文
+      var decoded = globalThis.JLBatchParser.decodeBiqugeBase64(html);
+      if (decoded) html = decoded;
+    }
     var text = globalThis.JLBatchParser.extractChapterText(html, site);
     if (site === "fanqie") text = decodeFanqieText(text);
     return { text: text, paywall: globalThis.JLBatchParser.isPaywall(html) };

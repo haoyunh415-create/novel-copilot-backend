@@ -11,6 +11,7 @@ import smtplib
 import sqlite3
 import time
 from contextlib import contextmanager
+from urllib.parse import urlsplit, urlunsplit
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional, List
@@ -617,6 +618,29 @@ class _AnalysisRejected(Exception):
         self.msg = msg
 
 
+def _book_url_prefix(source_url):
+    """从章节/目录 URL 提取「书级前缀」，用于同站点内区分不同书，防止跨书数据混用。
+
+    - 起点：/chapter/{book}/{chap}/ 或 /book/{book}/ → 保留到 book 一层
+    - 番茄：/read/{book}/ 或 /book/{book}/ → 保留到 book 一层
+    - 笔趣阁镜像（biquge/biquga 等）：首段即书目录（如 /9_9181/123456.html → /9_9181/）
+    - 兜底：域名 + 首段（不再退化为纯域名，避免同站所有书合并成一本书）
+    """
+    if not source_url:
+        return ""
+    parts = urlsplit(source_url)
+    segs = [s for s in parts.path.split("/") if s]
+    origin = urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+    if not segs:
+        return origin + "/"
+    p0 = segs[0].lower()
+    if p0 == "chapter" and len(segs) >= 2:
+        return f"{origin}/chapter/{segs[1]}/"
+    if p0 in ("book", "read") and len(segs) >= 2:
+        return f"{origin}/{p0}/{segs[1]}/"
+    return f"{origin}/{segs[0]}/"
+
+
 def _resolve_book_id(user, book_title, author, source_url, chapter_title):
     book_id = None
     with get_db() as conn:
@@ -634,8 +658,7 @@ def _resolve_book_id(user, book_title, author, source_url, chapter_title):
                 )
                 book_id = cur.lastrowid
         if not book_id and source_url:
-            mm = re.match(r"(https?://[^/]+(/[^/]+/[^/]+/)?)", source_url)
-            url_prefix = mm.group(1) if mm else source_url[:60]
+            url_prefix = _book_url_prefix(source_url)
             book = conn.execute(
                 "SELECT id FROM books WHERE username=? AND source_url_pattern=?",
                 (user, url_prefix),
@@ -1500,8 +1523,7 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
                 ).fetchone()
                 if book: cached_book_id = book["id"]
             if not cached_book_id and req.source_url:
-                m = re.match(r"(https?://[^/]+(/[^/]+/[^/]+/)?)", req.source_url)
-                url_prefix = m.group(1) if m else req.source_url[:60]
+                url_prefix = _book_url_prefix(req.source_url)
                 book = conn.execute(
                     "SELECT id FROM books WHERE username=? AND source_url_pattern=?",
                     (user, url_prefix),
@@ -1528,8 +1550,7 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
                 )
                 book_id = cur.lastrowid
         if not book_id and req.source_url:
-            m = re.match(r"(https?://[^/]+(/[^/]+/[^/]+/)?)", req.source_url)
-            url_prefix = m.group(1) if m else req.source_url[:60]
+            url_prefix = _book_url_prefix(req.source_url)
             book = conn.execute(
                 "SELECT id FROM books WHERE username=? AND source_url_pattern=?",
                 (user, url_prefix),
@@ -1764,8 +1785,7 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                 cur = conn.execute("INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?,?,?,?,?)", (user, req.book_title.strip(), req.author or "", req.source_url or "", int(time.time())))
                 book_id = cur.lastrowid
         if not book_id and req.source_url:
-            m = re.match(r"(https?://[^/]+(/[^/]+/[^/]+/)?)", req.source_url)
-            url_prefix = m.group(1) if m else req.source_url[:60]
+            url_prefix = _book_url_prefix(req.source_url)
             book = conn.execute("SELECT id FROM books WHERE username=? AND source_url_pattern=?", (user, url_prefix)).fetchone()
             if book: book_id = book["id"]
             else:
@@ -2078,8 +2098,7 @@ def _find_book(conn, user: str, book_title: str = None, book_id: int = None, sou
         return None
 
     if source_url:
-        m = re.match(r"(https?://[^/]+(/[^/]+/[^/]+/)?)", source_url)
-        url_prefix = m.group(1) if m else source_url[:60]
+        url_prefix = _book_url_prefix(source_url)
         book = conn.execute(
             "SELECT id, title FROM books WHERE username=? AND source_url_pattern=?",
             (user, url_prefix),
@@ -2295,8 +2314,7 @@ def match_book(url: str = None, title: str = None, user=Depends(get_user)):
                 return ok({"matched": True, "book": dict(book), "method": "title_fuzzy"})
 
         if url:
-            m = re.match(r"(https?://[^/]+(/[^/]+/[^/]+/)?)", url)
-            url_prefix = m.group(1) if m else url[:60]
+            url_prefix = _book_url_prefix(url)
             book = conn.execute(
                 "SELECT id, title, author, chapter_count FROM books WHERE username=? AND source_url_pattern=?",
                 (user, url_prefix),

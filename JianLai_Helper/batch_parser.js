@@ -16,6 +16,9 @@
 
   function looksLikeChapterHref(href) {
     if (!href) return false;
+    // 排除站点级静态/SEO 详情页（如 /book/7599.html、/list/12.html）：它们以「单段/数字.html」结尾却不是章节。
+    // 真正的笔趣阁章节是 {目录}/{章节id}.html 两段式（如 /9_9181/123456.html），起点章节是 /book/{书id}/{章id}.html。
+    if (/^\/(?:book|info|novel|list|search|author|tag|sort|top|full|quanben|wanben|new|rank|bang|tuijian|fenlei)\/\d+\.html?\/?$/i.test(href)) return false;
     return /\/chapter\/\d+\/\d+/i.test(href)
       || /\/(\d{3,})\.html?\/?$/i.test(href)
       || /[?&](?:id|chapterId|item_id)=(\d{4,})/i.test(href);
@@ -122,7 +125,7 @@
     var doc = parseHtml(html);
     var selectors = [
       "#content", "#chaptercontent", "#ChapterContent", "#txt",
-      ".read-content", ".main-text-wrap", ".chapter-content",
+      ".read-content", ".word_read", ".main-text-wrap", ".chapter-content",
       ".content", ".article-content", ".post-content",
       ".txt", ".text", ".novel-content", ".book-content",
       "article", ".entry-content", "#article", "#text",
@@ -144,11 +147,31 @@
     return best;
   }
 
+  // 笔趣阁 biquga 章节正文为 document.writeln(qsbs.bb('BASE64'))，qsbs.bb 即标准 base64 + UTF-8。
+  // 解码所有块并返回拼接后的 HTML（含 <p> 段落），供 extractChapterText 提取正文。
+  function decodeBiqugeBase64(html) {
+    if (!html) return "";
+    var re = /document\.writeln\(\s*qsbs\.bb\(\s*(['"])([^'"]+)\1\s*\)\s*\)/gi;
+    var m, chunks = [];
+    while ((m = re.exec(html)) !== null) {
+      var b64 = m[2].replace(/\s+/g, "");
+      if (!b64) continue;
+      try {
+        var bin = atob(b64);
+        var bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        chunks.push(new TextDecoder("utf-8").decode(bytes));
+      } catch (_) { /* 忽略无法解码的块 */ }
+    }
+    return chunks.join("\n");
+  }
+
   globalThis.JLBatchParser = {
     parseHtml: parseHtml,
     parseCatalog: parseCatalog,
     selectLatest: selectLatest,
     extractChapterText: extractChapterText,
+    decodeBiqugeBase64: decodeBiqugeBase64,
     extractIndex: extractIndex,
     cnToInt: cnToInt,
     cleanTitle: cleanTitle,

@@ -173,3 +173,37 @@ describe("selectLatest", () => {
     expect(P.selectLatest(list, 99)).toHaveLength(2);
   });
 });
+
+describe("biquga 目录/正文修复", () => {
+  it("looksLikeChapterHref 排除单段 SEO 详情页，保留笔趣阁两段式章节", () => {
+    expect(P.looksLikeChapterHref("/book/7599.html")).toBe(false);
+    expect(P.looksLikeChapterHref("/list/12.html")).toBe(false);
+    expect(P.looksLikeChapterHref("/search/12345.html")).toBe(false);
+    expect(P.looksLikeChapterHref("/9_9181/123456.html")).toBe(true);
+    // 起点两段式 /book/{书id}/{章id}.html 不受影响
+    expect(P.looksLikeChapterHref("/book/1/101.html")).toBe(true);
+  });
+
+  it("parseCatalog 过滤 SEO 链接并提取真实章节", () => {
+    const html = `
+      <html><body>
+        <a href="/book/7599.html">大符篆师</a>
+        <a href="/9_9181/">返回目录</a>
+        <a href="/9_9181/123456.html">第一章 精神力二十的天才</a>
+        <a href="/9_9181/123457.html">第二章 启灵</a>
+      </body></html>`;
+    const list = P.parseCatalog(html, "biquge");
+    const titles = list.map((c) => c.chapter_title);
+    expect(titles).toEqual(["第一章 精神力二十的天才", "第二章 启灵"]);
+  });
+
+  it("decodeBiqugeBase64 解码 qsbs.bb 正文并可用 extractChapterText 提取", () => {
+    const b64 = Buffer.from("<p>这是第一章的正文内容，用于测试笔趣阁解密后的段落提取效果。</p><p>这是第二章的正文内容，同样足够长以通过段落过滤阈值。</p>", "utf8").toString("base64");
+    const html = `<script>function qsbs(){}; document.writeln(qsbs.bb('${b64}'));</script>`;
+    const decoded = P.decodeBiqugeBase64(html);
+    expect(decoded).toContain("这是第一章的正文内容");
+    const text = P.extractChapterText(decoded, "biquge");
+    expect(text).toContain("这是第一章的正文内容");
+    expect(text).toContain("这是第二章的正文内容");
+  });
+});
