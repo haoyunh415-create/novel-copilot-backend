@@ -3541,6 +3541,7 @@
     var P = globalThis.JLBatchParser;
     var site = "biquge";
     var loading = showCatalogLoading();
+    var partial = false; // 是否因反爬只读到部分目录（书页之外的章节缺失）
     try {
       var seen = {};
       var all = [];
@@ -3560,7 +3561,9 @@
       if (entry) {
         var firstHtml = await fetchTextQuiet(entry);
         if (firstHtml) {
-          if (!bookId || !isAntiScrape(firstHtml, bookId)) {
+          if (bookId && isAntiScrape(firstHtml, bookId)) {
+            partial = true; // 分页页被反爬换成别的书，放弃补充
+          } else {
             var pageCount = P.biqugeCatalogPageCount(firstHtml);
             if (!pageCount || pageCount < 1) pageCount = 1;
             if (pageCount > 60) pageCount = 60; // 防御：异常站点不无限抓取
@@ -3569,12 +3572,13 @@
               var url = entry.replace(/index(?:_\d+)?\.html?$/i, "index_" + p + ".html");
               var html = await fetchTextQuiet(url);
               if (!html) continue;
-              if (bookId && isAntiScrape(html, bookId)) continue;
+              if (bookId && isAntiScrape(html, bookId)) { partial = true; continue; }
               add(P.parseCatalog(html, site, url));
             }
           }
         }
       }
+      if (partial && all.length) showCatalogPartialToast(all.length);
       return all.length ? all : null;
     } finally {
       if (loading) loading.remove();
@@ -3585,6 +3589,18 @@
   function isAntiScrape(html, bookId) {
     var aid = (html.match(/read_aid\s*=\s*['"](\d+)['"]/i) || [])[1];
     return !!aid && aid !== bookId;
+  }
+
+  // 目录被反爬截断时的轻量提示（非阻塞，自动消失，不遮挡后续的选章面板）
+  function showCatalogPartialToast(count) {
+    var old = document.getElementById("jl-catalog-toast");
+    if (old) old.remove();
+    var el = document.createElement("div");
+    el.id = "jl-catalog-toast";
+    el.style.cssText = "position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:2147483647;background:#5D4037;color:#FFF8E1;padding:11px 16px;border-radius:8px;font-size:13px;line-height:1.5;box-shadow:0 8px 24px rgba(0,0,0,.35);max-width:88vw;text-align:center;font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif";
+    el.textContent = "⚠️ 目录可能不完整：已读取 " + count + " 章；本站对本书的分页目录做了反爬限制，书页之外的章节未能读取。";
+    document.body.appendChild(el);
+    setTimeout(function () { if (el.parentNode) el.remove(); }, 6000);
   }
 
   async function fetchTextQuiet(url) {
