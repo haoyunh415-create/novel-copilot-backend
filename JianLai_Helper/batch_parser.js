@@ -61,9 +61,9 @@
     return null;
   }
 
-  function absoluteUrl(doc, href) {
+  function absoluteUrl(doc, href, baseUrl) {
     var base = doc.querySelector("base[href]");
-    var baseHref = base ? base.getAttribute("href") : doc.baseURI;
+    var baseHref = base ? base.getAttribute("href") : (baseUrl || doc.baseURI);
     try { return new URL(href, baseHref || "http://x/").href; } catch (_) { return null; }
   }
 
@@ -78,7 +78,7 @@
     return m ? m[1] : null;
   }
 
-  function parseCatalog(html, site) {
+  function parseCatalog(html, site, baseUrl) {
     var doc = parseHtml(html);
     var anchors = Array.from(doc.querySelectorAll("a[href]"));
     var indexByKey = {};   // 去重键 → out 下标（保留 DOM 阅读顺序）
@@ -90,7 +90,7 @@
       if (!title || title.length < 1 || title.length > 120) return;
       if (isNavLabel(title)) return;
       if (!isChapterTitle(title) && !looksLikeChapterHref(href)) return;
-      var abs = absoluteUrl(doc, href);
+      var abs = absoluteUrl(doc, href, baseUrl);
       if (!abs) return;
       var cid = chapterId(href) || chapterId(abs);
       var key = cid ? ("cid:" + cid) : ("url:" + abs);
@@ -166,6 +166,40 @@
     return chunks.join("\n");
   }
 
+  // 笔趣阁（biquga）目录分页入口：书页只显示「最新章节」，完整目录在 index_1.html…index_N.html。
+  // 从当前页 DOM 找「查看更多章节 / 章节目录」链接（href 指向 index 系列），统一归一为 index_1.html；
+  // 已在 index_N.html 页时，直接从当前 URL 派生。返回绝对 URL 或 null。
+  function biqugeCatalogEntryHref(doc, currentHref) {
+    var m = (currentHref || "").match(/^(.*?)\/index(?:_\d+)?\.html?$/i);
+    if (m) return m[1] + "/index_1.html";
+    var anchors = doc.querySelectorAll("a[href]");
+    for (var i = 0; i < anchors.length; i++) {
+      var href = anchors[i].getAttribute("href");
+      if (!href || !/index(?:_\d+)?\.html?$/i.test(href)) continue;
+      var abs = absoluteUrl(doc, href, currentHref);
+      if (abs) return abs.replace(/index(?:_\d+)?\.html?$/i, "index_1.html");
+    }
+    return null;
+  }
+
+  // 笔趣阁目录分页总数：扫描 index_N.html 分页链接取最大页码；兜底解析「共 N 页」文字。
+  function biqugeCatalogPageCount(html) {
+    var doc = parseHtml(html);
+    var max = 0;
+    var anchors = doc.querySelectorAll("a[href]");
+    anchors.forEach(function (a) {
+      var href = a.getAttribute("href") || "";
+      var mm = href.match(/index_(\d+)\.html?$/i);
+      if (mm) { var n = parseInt(mm[1], 10); if (n > max) max = n; }
+    });
+    if (!max) {
+      var txt = (doc.body && doc.body.textContent) || "";
+      var tm = txt.match(/共\s*(\d+)\s*页/);
+      if (tm) max = parseInt(tm[1], 10);
+    }
+    return max > 0 ? max : 1;
+  }
+
   globalThis.JLBatchParser = {
     parseHtml: parseHtml,
     parseCatalog: parseCatalog,
@@ -180,5 +214,7 @@
     isNavLabel: isNavLabel,
     chapterId: chapterId,
     isPaywall: isPaywall,
+    biqugeCatalogEntryHref: biqugeCatalogEntryHref,
+    biqugeCatalogPageCount: biqugeCatalogPageCount,
   };
 })();

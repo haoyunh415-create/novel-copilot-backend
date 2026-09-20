@@ -207,3 +207,35 @@ describe("biquga 目录/正文修复", () => {
     expect(text).toContain("这是第二章的正文内容");
   });
 });
+
+describe("biquga 分页目录", () => {
+  it("biqugeCatalogEntryHref 从书页找「查看更多章节」入口并归一为 index_1.html", () => {
+    const doc = P.parseHtml('<a href="/46_46911/index_1.html">查看更多章节</a>');
+    const entry = P.biqugeCatalogEntryHref(doc, "https://www.biquga.com/46_46911/");
+    expect(entry).toBe("https://www.biquga.com/46_46911/index_1.html");
+  });
+
+  it("biqugeCatalogEntryHref 已在 index_N 页时直接派生 index_1.html", () => {
+    const entry = P.biqugeCatalogEntryHref(null, "https://www.biquga.com/46_46911/index_5.html");
+    expect(entry).toBe("https://www.biquga.com/46_46911/index_1.html");
+  });
+
+  it("biqugeCatalogEntryHref 无目录入口时返回 null", () => {
+    const doc = P.parseHtml('<a href="/46_46911/123456.html">第一章 开端</a>');
+    expect(P.biqugeCatalogEntryHref(doc, "https://www.biquga.com/46_46911/")).toBe(null);
+  });
+
+  it("biqugeCatalogPageCount 扫描分页链接取最大页码", () => {
+    const html = `<html><body>
+      <a href="index_1.html">1</a>
+      <a href="index_2.html">2</a>
+      <a href="index_36.html">36</a>
+    </body></html>`;
+    expect(P.biqugeCatalogPageCount(html)).toBe(36);
+  });
+
+  it("biqugeCatalogPageCount 无分页链接回退 1，支持「共 N 页」文字", () => {
+    expect(P.biqugeCatalogPageCount("<html><body>单页目录</body></html>")).toBe(1);
+    expect(P.biqugeCatalogPageCount('<html><body>共 36 页</body></html>')).toBe(36);
+  });
+});

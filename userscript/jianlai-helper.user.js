@@ -3147,9 +3147,9 @@
       return null;
     }
 
-    function absoluteUrl(doc, href) {
+    function absoluteUrl(doc, href, baseUrl) {
       var base = doc.querySelector("base[href]");
-      var baseHref = base ? base.getAttribute("href") : doc.baseURI;
+      var baseHref = base ? base.getAttribute("href") : (baseUrl || doc.baseURI);
       try { return new URL(href, baseHref || "http://x/").href; } catch (_) { return null; }
     }
 
@@ -3164,7 +3164,7 @@
       return m ? m[1] : null;
     }
 
-    function parseCatalog(html, site) {
+    function parseCatalog(html, site, baseUrl) {
       var doc = parseHtml(html);
       var anchors = Array.from(doc.querySelectorAll("a[href]"));
       var indexByKey = {};   // 去重键 → out 下标（保留 DOM 阅读顺序）
@@ -3176,7 +3176,7 @@
         if (!title || title.length < 1 || title.length > 120) return;
         if (isNavLabel(title)) return;
         if (!isChapterTitle(title) && !looksLikeChapterHref(href)) return;
-        var abs = absoluteUrl(doc, href);
+        var abs = absoluteUrl(doc, href, baseUrl);
         if (!abs) return;
         var cid = chapterId(href) || chapterId(abs);
         var key = cid ? ("cid:" + cid) : ("url:" + abs);
@@ -3251,6 +3251,40 @@
       return chunks.join("\n");
     }
 
+    // 笔趣阁（biquga）目录分页入口：书页只显示「最新章节」，完整目录在 index_1.html…index_N.html。
+    // 从当前页 DOM 找「查看更多章节 / 章节目录」链接（href 指向 index 系列），统一归一为 index_1.html；
+    // 已在 index_N.html 页时，直接从当前 URL 派生。返回绝对 URL 或 null。
+    function biqugeCatalogEntryHref(doc, currentHref) {
+      var m = (currentHref || "").match(/^(.*?)\/index(?:_\d+)?\.html?$/i);
+      if (m) return m[1] + "/index_1.html";
+      var anchors = doc.querySelectorAll("a[href]");
+      for (var i = 0; i < anchors.length; i++) {
+        var href = anchors[i].getAttribute("href");
+        if (!href || !/index(?:_\d+)?\.html?$/i.test(href)) continue;
+        var abs = absoluteUrl(doc, href, currentHref);
+        if (abs) return abs.replace(/index(?:_\d+)?\.html?$/i, "index_1.html");
+      }
+      return null;
+    }
+
+    // 笔趣阁目录分页总数：扫描 index_N.html 分页链接取最大页码；兜底解析「共 N 页」文字。
+    function biqugeCatalogPageCount(html) {
+      var doc = parseHtml(html);
+      var max = 0;
+      var anchors = doc.querySelectorAll("a[href]");
+      anchors.forEach(function (a) {
+        var href = a.getAttribute("href") || "";
+        var mm = href.match(/index_(\d+)\.html?$/i);
+        if (mm) { var n = parseInt(mm[1], 10); if (n > max) max = n; }
+      });
+      if (!max) {
+        var txt = (doc.body && doc.body.textContent) || "";
+        var tm = txt.match(/共\s*(\d+)\s*页/);
+        if (tm) max = parseInt(tm[1], 10);
+      }
+      return max > 0 ? max : 1;
+    }
+
     globalThis.JLBatchParser = {
       parseHtml: parseHtml,
       parseCatalog: parseCatalog,
@@ -3263,6 +3297,8 @@
       isChapterTitle: isChapterTitle,
       looksLikeChapterHref: looksLikeChapterHref,
       isPaywall: isPaywall,
+      biqugeCatalogEntryHref: biqugeCatalogEntryHref,
+      biqugeCatalogPageCount: biqugeCatalogPageCount,
     };
   })();
 
@@ -3450,9 +3486,24 @@
 
   // ── 批量分析入口（主窗口 footer「📚 批量分析」按钮）──
   function startBatchFromWindow() {
+    var site = detectSite();
     if (detectCatalogPage()) {
+      if (site === "biquge") {
+        var onDone = function (all) {
+          if (all && all.length) { showBatchChapterPicker(all); return; }
+          var html = document.documentElement.outerHTML;
+          var cur = globalThis.JLBatchParser.parseCatalog(html, site);
+          if (!cur.length) {
+            jlModal({ title: "批量分析", message: "未在目录页解析到章节列表，请刷新后重试。" });
+            return;
+          }
+          showBatchChapterPicker(cur);
+        };
+        collectBiqugeCatalog().then(onDone, function () { onDone(null); });
+        return;
+      }
       var html = document.documentElement.outerHTML;
-      var all = globalThis.JLBatchParser.parseCatalog(html, detectSite());
+      var all = globalThis.JLBatchParser.parseCatalog(html, site);
       if (!all.length) {
         jlModal({ title: "批量分析", message: "未在目录页解析到章节列表，请刷新后重试。" });
         return;
@@ -3467,6 +3518,55 @@
     } else {
       jlModal({ title: "批量分析", message: "请先打开小说的目录页（章节列表页），再点批量分析。" });
     }
+  }
+
+  // 读取笔趣阁完整目录：书页只显示「最新章节」，完整目录分页在 index_1…index_N.html，需逐页抓取合并。
+  async function collectBiqugeCatalog() {
+    var P = globalThis.JLBatchParser;
+    var site = "biquge";
+    var loading = showCatalogLoading();
+    try {
+      var entry = P.biqugeCatalogEntryHref(document, location.href);
+      if (!entry) return null;
+      var firstHtml;
+      try {
+        var r1 = await fetchWithRetry(entry, { credentials: "include" }, 2);
+        firstHtml = await r1.text();
+      } catch (_) { return null; }
+      var pageCount = P.biqugeCatalogPageCount(firstHtml);
+      if (!pageCount || pageCount < 1) pageCount = 1;
+      if (pageCount > 60) pageCount = 60; // 防御：异常站点不无限抓取
+      var pages = [{ url: entry, html: firstHtml }];
+      for (var p = 2; p <= pageCount; p++) {
+        var url = entry.replace(/index(?:_\d+)?\.html?$/i, "index_" + p + ".html");
+        try {
+          var rp = await fetchWithRetry(url, { credentials: "include" }, 2);
+          pages.push({ url: url, html: await rp.text() });
+        } catch (_) { /* 单页失败跳过，继续下一页 */ }
+      }
+      var all = [];
+      var seen = {};
+      pages.forEach(function (pg) {
+        P.parseCatalog(pg.html, site, pg.url).forEach(function (c) {
+          if (!seen[c.source_url]) { seen[c.source_url] = true; all.push(c); }
+        });
+      });
+      return all.length ? all : null;
+    } finally {
+      if (loading) loading.remove();
+    }
+  }
+
+  // 临时加载遮罩：多页目录抓取需数秒，给用户明确反馈
+  function showCatalogLoading() {
+    var old = document.getElementById("jl-catalog-loading");
+    if (old) old.remove();
+    var el = document.createElement("div");
+    el.id = "jl-catalog-loading";
+    el.style.cssText = "position:fixed;inset:0;z-index:2147483646;background:rgba(30,20,15,.45);display:flex;align-items:center;justify-content:center;font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif";
+    el.innerHTML = '<div style="background:#FFFDF7;border-radius:12px;padding:22px 30px;color:#5D4037;font-size:14px;box-shadow:0 16px 48px rgba(0,0,0,.3)">📚 正在读取完整章节目录…</div>';
+    document.body.appendChild(el);
+    return el;
   }
 
   // 有未完成任务时让用户选择「续跑」或「新建」；否则直接开始
