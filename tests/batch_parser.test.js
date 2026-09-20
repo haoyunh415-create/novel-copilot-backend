@@ -238,4 +238,61 @@ describe("biquga 分页目录", () => {
     expect(P.biqugeCatalogPageCount("<html><body>单页目录</body></html>")).toBe(1);
     expect(P.biqugeCatalogPageCount('<html><body>共 36 页</body></html>')).toBe(36);
   });
+
+  it("biqugeCatalogPageCount 扫描 <option value> 下拉分页", () => {
+    const html = `<html><body>
+      <select>
+        <option value="/263_263537/index_1.html">第1-100章</option>
+        <option value="/263_263537/index_7.html">第601-635章</option>
+      </select>
+    </body></html>`;
+    expect(P.biqugeCatalogPageCount(html)).toBe(7);
+  });
+});
+
+describe("biquga read_tz 渲染目录", () => {
+  it("readTzContext 提取模板并拼装章节 URL", () => {
+    const html = `<script>var read_aid='11763279';var read_bid='11763';var read_rewrite='/book/{aid}/{cid}.html';</script>`;
+    const ctx = P.readTzContext(html);
+    expect(ctx.buildUrl("137677333")).toBe("/book/11763279/137677333.html");
+  });
+
+  it("readTzContext 旧格式 /{bid}_{aid}/{cid}.html", () => {
+    const html = `<script>read_aid='263537';read_bid='263';read_rewrite='/{bid}_{aid}/{cid}.html';</script>`;
+    const ctx = P.readTzContext(html);
+    expect(ctx.buildUrl("130923665")).toBe("/263_263537/130923665.html");
+  });
+
+  it("parseCatalog 解析 onclick=read_tz 章节（无 href）", () => {
+    const html = `<html><body>
+      <script>var read_aid='11763279';var read_bid='11763';var read_rewrite='/book/{aid}/{cid}.html';</script>
+      <a onclick="read_tz(137677333)">第81章 女儿国女王</a>
+      <a onclick="read_tz(137677332)">第80章 四圣争辩</a>
+      <a onclick="read_tz('137677331')">第79章 通天</a>
+    </body></html>`;
+    const list = P.parseCatalog(html, "biquge", "https://www.biquga.com/book/11763279/index_1.html");
+    expect(list).toHaveLength(3);
+    expect(list[0].source_url).toBe("https://www.biquga.com/book/11763279/137677333.html");
+    expect(list[0].chapter_index).toBe(81);
+    expect(list[2].chapter_index).toBe(79);
+  });
+
+  it("parseCatalog 合并 href 与 read_tz 并去重", () => {
+    const html = `<html><body>
+      <script>read_aid='11763279';read_bid='11763';read_rewrite='/book/{aid}/{cid}.html';</script>
+      <a href="/book/11763279/137677333.html">第81章 女儿国女王</a>
+      <a onclick="read_tz(137677333)">第81章 女儿国女王</a>
+      <a onclick="read_tz(137677332)">第80章 四圣争辩</a>
+    </body></html>`;
+    const list = P.parseCatalog(html, "biquge", "https://www.biquga.com/book/11763279/index_1.html");
+    expect(list).toHaveLength(2);
+    expect(list.map((c) => c.chapter_index).sort()).toEqual([80, 81]);
+  });
+
+  it("biqugeBookId 识别新旧两种格式", () => {
+    expect(P.biqugeBookId("https://www.biquga.com/book/11763279.html")).toBe("11763279");
+    expect(P.biqugeBookId("https://www.biquga.com/book/11763279/index_1.html")).toBe("11763279");
+    expect(P.biqugeBookId("https://www.biquga.com/263_263537/")).toBe("263537");
+    expect(P.biqugeBookId("https://www.biquga.com/263_263537/index_2.html")).toBe("263537");
+  });
 });

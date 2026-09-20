@@ -3196,6 +3196,37 @@
       return /^(旧版|新版|下一章|上一章|下一节|上一节|下一页|上一页|目录|章节目录|章节列表|返回目录|返回书页|立即阅读|开始阅读|免费试读|试读|全文阅读|阅读全文|加入书架|书架|点击阅读|展开全部|收起)$/.test(t || "");
     }
 
+    // 笔趣阁 biquga 分页目录（index_N.html / 「查看更多章节」）里章节链接是 JS 渲染：
+    //   <a onclick="read_tz(123456)">第N章…</a>（无 href）
+    // 站点脚本给出拼装模板：
+    //   read_aid='…'; read_bid='…'; read_rewrite='/book/{aid}/{cid}.html' 或 '/{bid}_{aid}/{cid}.html'
+    // 此处抽取模板与参数，供 parseCatalog 把 onclick 还原成真实章节 URL。
+    function readTzContext(html) {
+      if (!html) return null;
+      var aid = (html.match(/read_aid\s*=\s*['"](\d+)['"]/i) || [])[1] || "";
+      var bid = (html.match(/read_bid\s*=\s*['"](\d+)['"]/i) || [])[1] || "";
+      var rewrite = (html.match(/read_rewrite\s*=\s*['"]([^'"]+)['"]/i) || [])[1];
+      if (!rewrite) return null;
+      return {
+        aid: aid,
+        bid: bid,
+        rewrite: rewrite,
+        buildUrl: function (id) {
+          return rewrite.replace(/\{aid\}/g, aid).replace(/\{bid\}/g, bid).replace(/\{cid\}/g, String(id));
+        },
+      };
+    }
+
+    // 从当前 URL 推导笔趣阁书的唯一 ID：新格式 /book/{id}.html，旧格式 /{bid}_{aid}/。
+    // 用于校验分页抓取页是否被反爬换成别的书（read_aid 与书 ID 不符即丢弃）。
+    function biqugeBookId(href) {
+      var m = (href || "").match(/\/book\/(\d+)(?:\/|\.html?)/i);
+      if (m) return m[1];
+      var m2 = (href || "").match(/\/(\d+)_(\d+)(?:\/|\.html?)/i);
+      if (m2) return m2[2];
+      return null;
+    }
+
     // 起点章节唯一 ID：/chapter/{book}/{cid}/ 中的 cid（read.qidian.com / www.qidian.com / 尾斜杠 视为同一章）
     function chapterId(href) {
       var m = (href || "").match(/\/chapter\/\d+\/(\d+)\/?/i);
@@ -3229,6 +3260,34 @@
         indexByKey[key] = out.length;
         out.push(entry);
       });
+
+      // 第二遍：read_tz(onclick) 渲染的章节链接（无 href）——笔趣阁分页目录/「查看更多章节」用 JS 拼装 URL
+      var tz = readTzContext(html);
+      if (tz) {
+        Array.from(doc.querySelectorAll("[onclick]")).forEach(function (a) {
+          var oc = a.getAttribute("onclick") || "";
+          var mm = oc.match(/read_tz\s*\(\s*['"]?(\d+)['"]?\s*\)/i);
+          if (!mm) return;
+          var title = cleanTitle(a.textContent || a.getAttribute("title"));
+          if (!title || title.length < 1 || title.length > 120) return;
+          if (isNavLabel(title)) return;
+          if (!isChapterTitle(title) && !looksLikeChapterHref(oc)) return;
+          var rel = tz.buildUrl(mm[1]);
+          var abs = absoluteUrl(doc, rel, baseUrl);
+          if (!abs) return;
+          var cid = chapterId(rel) || chapterId(abs);
+          var key = cid ? ("cid:" + cid) : ("url:" + abs);
+          var entry = { chapter_title: title, chapter_index: extractIndex(title, rel), source_url: abs };
+          var idx = indexByKey[key];
+          if (idx !== undefined) {
+            var prev = out[idx];
+            if (isChapterTitle(title) && !isChapterTitle(prev.chapter_title)) out[idx] = entry;
+            return;
+          }
+          indexByKey[key] = out.length;
+          out.push(entry);
+        });
+      }
       return out;
     }
 
@@ -3305,13 +3364,12 @@
       return null;
     }
 
-    // 笔趣阁目录分页总数：扫描 index_N.html 分页链接取最大页码；兜底解析「共 N 页」文字。
+    // 笔趣阁目录分页总数：扫描 index_N.html 分页链接（含 <option value="…index_N.html"> 下拉分页）取最大页码；兜底解析「共 N 页」文字。
     function biqugeCatalogPageCount(html) {
       var doc = parseHtml(html);
       var max = 0;
-      var anchors = doc.querySelectorAll("a[href]");
-      anchors.forEach(function (a) {
-        var href = a.getAttribute("href") || "";
+      Array.from(doc.querySelectorAll("a[href], option[value]")).forEach(function (el) {
+        var href = el.getAttribute("href") || el.getAttribute("value") || "";
         var mm = href.match(/index_(\d+)\.html?$/i);
         if (mm) { var n = parseInt(mm[1], 10); if (n > max) max = n; }
       });
@@ -3337,6 +3395,8 @@
       isPaywall: isPaywall,
       biqugeCatalogEntryHref: biqugeCatalogEntryHref,
       biqugeCatalogPageCount: biqugeCatalogPageCount,
+      readTzContext: readTzContext,
+      biqugeBookId: biqugeBookId,
     };
   })();
 
@@ -3558,41 +3618,64 @@
     }
   }
 
-  // 读取笔趣阁完整目录：书页只显示「最新章节」，完整目录分页在 index_1…index_N.html，需逐页抓取合并。
+  // 读取笔趣阁完整目录。核心：先直接解析当前页（书页本身就是完整目录，绝不能丢），
+  // 再若存在「查看更多章节 / index_N」分页入口则逐页抓取补充（read_tz 渲染的其余章节），
+  // 并校验抓取页 read_aid 与当前书 ID 一致，防止反爬返回别本书污染目录。
   async function collectBiqugeCatalog() {
     var P = globalThis.JLBatchParser;
     var site = "biquge";
     var loading = showCatalogLoading();
     try {
-      var entry = P.biqugeCatalogEntryHref(document, location.href);
-      if (!entry) return null;
-      var firstHtml;
-      try {
-        var r1 = await fetchWithRetry(entry, { credentials: "include" }, 2);
-        firstHtml = await r1.text();
-      } catch (_) { return null; }
-      var pageCount = P.biqugeCatalogPageCount(firstHtml);
-      if (!pageCount || pageCount < 1) pageCount = 1;
-      if (pageCount > 60) pageCount = 60; // 防御：异常站点不无限抓取
-      var pages = [{ url: entry, html: firstHtml }];
-      for (var p = 2; p <= pageCount; p++) {
-        var url = entry.replace(/index(?:_\d+)?\.html?$/i, "index_" + p + ".html");
-        try {
-          var rp = await fetchWithRetry(url, { credentials: "include" }, 2);
-          pages.push({ url: url, html: await rp.text() });
-        } catch (_) { /* 单页失败跳过，继续下一页 */ }
-      }
-      var all = [];
       var seen = {};
-      pages.forEach(function (pg) {
-        P.parseCatalog(pg.html, site, pg.url).forEach(function (c) {
+      var all = [];
+      function add(list) {
+        (list || []).forEach(function (c) {
+          if (!c || !c.source_url) return;
           if (!seen[c.source_url]) { seen[c.source_url] = true; all.push(c); }
         });
-      });
+      }
+
+      // 1) 当前页直接解析 —— 这是基础目录，绝对保留
+      add(P.parseCatalog(document.documentElement.outerHTML, site, location.href));
+
+      // 2) 分页补充
+      var bookId = P.biqugeBookId(location.href);
+      var entry = P.biqugeCatalogEntryHref(document, location.href);
+      if (entry) {
+        var firstHtml = await fetchTextQuiet(entry);
+        if (firstHtml) {
+          if (!bookId || !isAntiScrape(firstHtml, bookId)) {
+            var pageCount = P.biqugeCatalogPageCount(firstHtml);
+            if (!pageCount || pageCount < 1) pageCount = 1;
+            if (pageCount > 60) pageCount = 60; // 防御：异常站点不无限抓取
+            add(P.parseCatalog(firstHtml, site, entry));
+            for (var p = 2; p <= pageCount; p++) {
+              var url = entry.replace(/index(?:_\d+)?\.html?$/i, "index_" + p + ".html");
+              var html = await fetchTextQuiet(url);
+              if (!html) continue;
+              if (bookId && isAntiScrape(html, bookId)) continue;
+              add(P.parseCatalog(html, site, url));
+            }
+          }
+        }
+      }
       return all.length ? all : null;
     } finally {
       if (loading) loading.remove();
     }
+  }
+
+  // 抓取页是否被反爬换成别的书：read_aid 与当前书 ID 不符即视为污染
+  function isAntiScrape(html, bookId) {
+    var aid = (html.match(/read_aid\s*=\s*['"](\d+)['"]/i) || [])[1];
+    return !!aid && aid !== bookId;
+  }
+
+  async function fetchTextQuiet(url) {
+    try {
+      var r = await fetchWithRetry(url, { credentials: "include" }, 2);
+      return await r.text();
+    } catch (_) { return null; }
   }
 
   // 临时加载遮罩：多页目录抓取需数秒，给用户明确反馈
