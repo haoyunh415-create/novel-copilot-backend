@@ -613,18 +613,33 @@
   }
 
   // 自动重试 fetch（最多重试 2 次，指数退避；AbortError 不重试）
-  async function fetchWithRetry(url, options, retries) {
+  async function fetchWithRetry(url, options, retries, timeoutMs) {
     retries = retries || 2;
+    options = options || {};
     var lastError;
+    var callerSignal = options.signal;
     for (var i = 0; i <= retries; i++) {
+      var ctrl = null, to = null, fetchOptions = options;
+      // 单次请求超时保护：站点卡死/无响应时快速失败重试，而不是无限等待（后端 AI 接口不传 timeoutMs）
+      if (timeoutMs > 0 && !callerSignal) {
+        ctrl = new AbortController();
+        to = setTimeout(function () { ctrl.abort(); }, timeoutMs);
+        fetchOptions = Object.assign({}, options, { signal: ctrl.signal });
+      }
       try {
-        var resp = await fetch(url, options);
+        var resp = await fetch(url, fetchOptions);
         if (resp.ok || i === retries) return resp;
         if (resp.status >= 500) { lastError = new Error("服务器错误(" + resp.status + ")，正在重试..."); }
         else return resp;
       } catch (e) {
-        if (e.name === "AbortError") throw e; // 用户取消，不重试
-        lastError = e;
+        if (e.name === "AbortError") {
+          if (callerSignal && callerSignal.aborted) throw e; // 用户取消，不重试
+          lastError = new Error("请求超时，请稍后重试");
+        } else {
+          lastError = e;
+        }
+      } finally {
+        if (to) clearTimeout(to);
       }
       if (i < retries) {
         await new Promise(function (r) { return setTimeout(r, Math.pow(2, i) * 1000); });
@@ -3165,25 +3180,33 @@
       // 1) 当前页直接解析 —— 这是基础目录，绝对保留
       add(P.parseCatalog(document.documentElement.outerHTML, site, location.href));
 
-      // 2) 分页补充
-      var bookId = P.biqugeBookId(location.href);
-      var entry = P.biqugeCatalogEntryHref(document, location.href);
-      if (entry) {
-        var firstHtml = await fetchTextQuiet(entry);
-        if (firstHtml) {
-          if (bookId && isAntiScrape(firstHtml, bookId)) {
-            partial = true; // 分页页被反爬换成别的书，放弃补充
-          } else {
-            var pageCount = P.biqugeCatalogPageCount(firstHtml);
-            if (!pageCount || pageCount < 1) pageCount = 1;
-            if (pageCount > 60) pageCount = 60; // 防御：异常站点不无限抓取
-            add(P.parseCatalog(firstHtml, site, entry));
-            for (var p = 2; p <= pageCount; p++) {
-              var url = entry.replace(/index(?:_\d+)?\.html?$/i, "index_" + p + ".html");
-              var html = await fetchTextQuiet(url);
-              if (!html) continue;
-              if (bookId && isAntiScrape(html, bookId)) { partial = true; continue; }
-              add(P.parseCatalog(html, site, url));
+      // 2) 分页补充：仅当书页目录不完整时才抓取（小书直接返回，避免无谓等待）
+      if (!isCatalogComplete(all)) {
+        var bookId = P.biqugeBookId(location.href);
+        var entry = P.biqugeCatalogEntryHref(document, location.href);
+        if (entry) {
+          var firstHtml = await fetchTextQuiet(entry);
+          if (firstHtml) {
+            if (bookId && isAntiScrape(firstHtml, bookId)) {
+              partial = true; // 分页页被反爬换成别的书，放弃补充
+            } else {
+              var pageCount = P.biqugeCatalogPageCount(firstHtml);
+              if (!pageCount || pageCount < 1) pageCount = 1;
+              if (pageCount > 60) pageCount = 60; // 防御：异常站点不无限抓取
+              add(P.parseCatalog(firstHtml, site, entry));
+              // 并行抓取其余分页，避免串行等待（大书提速明显）
+              var urls = [];
+              for (var p = 2; p <= pageCount; p++) {
+                urls.push(entry.replace(/index(?:_\d+)?\.html?$/i, "index_" + p + ".html"));
+              }
+              var pages = await Promise.all(urls.map(function (u) {
+                return fetchTextQuiet(u).then(function (html) {
+                  if (!html) return null;
+                  if (bookId && isAntiScrape(html, bookId)) { partial = true; return null; }
+                  return P.parseCatalog(html, site, u);
+                });
+              }));
+              pages.forEach(add);
             }
           }
         }
@@ -3201,6 +3224,23 @@
     return !!aid && aid !== bookId;
   }
 
+  // 判断书页目录是否已完整（章节号 1..max 连续无缺口），是则跳过慢速分页抓取
+  function isCatalogComplete(list) {
+    if (!list || list.length < 2) return false;
+    var uniq = {};
+    var count = 0, max = 0, indexed = 0;
+    list.forEach(function (c) {
+      var n = c.chapter_index;
+      if (typeof n === "number" && n > 0) {
+        indexed++;
+        if (!uniq[n]) { uniq[n] = true; count++; }
+        if (n > max) max = n;
+      }
+    });
+    if (max < 2 || indexed < list.length * 0.8) return false;
+    return count === max;
+  }
+
   // 目录被反爬截断时的轻量提示（非阻塞，自动消失，不遮挡后续的选章面板）
   function showCatalogPartialToast(count) {
     var old = document.getElementById("jl-catalog-toast");
@@ -3215,7 +3255,7 @@
 
   async function fetchTextQuiet(url) {
     try {
-      var r = await fetchWithRetry(url, { credentials: "include" }, 2);
+      var r = await fetchWithRetry(url, { credentials: "include" }, 2, 15000);
       return await r.text();
     } catch (_) { return null; }
   }
@@ -3423,7 +3463,7 @@
     if (site === "qidian") {
       return fetchChapterViaIframe(source_url);
     }
-    var r = await fetchWithRetry(source_url, { credentials: "include" }, 2);
+    var r = await fetchWithRetry(source_url, { credentials: "include" }, 2, 15000);
     var html = await r.text();
     if (site === "biquge") {
       // 笔趣阁 biquga 正文是 document.writeln(qsbs.bb('BASE64'))，先解码再提正文
