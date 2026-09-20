@@ -87,6 +87,30 @@ AI 自动追踪小说伏笔、生成人物关系图、无剧透前情提要。�
 
 ---
 
+## 📜 认证说明（Certification Justification，<2000 字符）
+
+提交表单的「认证说明」字段填以下英文（每次提交都需提供，即使之前提交过）：
+
+"鉴来助手" (Novel Copilot) is a reading assistant for Chinese web-novel readers. It produces spoiler-free chapter summaries, foreshadowing tracking, and character-relationship graphs via the user's own AI backend.
+
+Permission justifications:
+
+1. storage — Stores the login token and UI preferences (chapter sort order, server URL) locally. Accessed only on user action; no background reads or transmission.
+
+2. activeTab — Reads the current tab only when the user clicks the extension icon. The extension does not monitor tabs in the background.
+
+3. scripting — Injects the assistant panel on user action. Needed because several supported single-page-app sites block content scripts from auto-loading.
+
+4. host_permissions https://jianla.xyz:8000/* — The extension's own backend API, used for AI analysis, email-code login, and credit management. This is our single self-hosted endpoint.
+
+5. Content scripts on 26 novel-reading domains — These are the supported reading platforms (e.g., qidian.com, fanqienovel.com). Access is limited to reading the currently-open chapter text and rendering the panel; no cross-site collection.
+
+Remote code: None. All code is bundled in this package; the extension only calls our own backend and never loads or executes remote code.
+
+Data use: Only the chapter text a user explicitly chooses to analyze is sent to our backend to generate summaries. Original text is not stored (results are cached by content hash), data is never sold or used for advertising, and email is used solely for verification-code login.
+
+---
+
 ## 🖼️ 截图
 
 已调整为 1280×800 像素，位于 `JianLai_Helper/screenshots/` 目录：

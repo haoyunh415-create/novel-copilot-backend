@@ -19,6 +19,8 @@
     // 排除站点级静态/SEO 详情页（如 /book/7599.html、/list/12.html）：它们以「单段/数字.html」结尾却不是章节。
     // 真正的笔趣阁章节是 {目录}/{章节id}.html 两段式（如 /9_9181/123456.html），起点章节是 /book/{书id}/{章id}.html。
     if (/^\/(?:book|info|novel|list|search|author|tag|sort|top|full|quanben|wanben|new|rank|bang|tuijian|fenlei)\/\d+\.html?\/?$/i.test(href)) return false;
+    // 纵横/起点打赏榜（粉丝榜）用户名链接 /show/userInfo/{id}.html：不是章节，却以「/数字.html」结尾被误判
+    if (/\/userInfo\/\d+\.html?\/?$/i.test(href)) return false;
     return /\/chapter\/\d+\/\d+/i.test(href)
       || /\/(\d{3,})\.html?\/?$/i.test(href)
       || /[?&](?:id|chapterId|item_id)=(\d{4,})/i.test(href);
@@ -49,6 +51,8 @@
   }
 
   function extractIndex(title, href) {
+    // 番外/外传/后记/尾声 等非正文章节的「第X章」会与正文撞号，返回 null 交由上层信任 DOM 阅读顺序
+    if (/(番外|外传|后记|尾声|感言)/.test(title || "")) return null;
     var m = title.match(/第\s*([0-9一二三四五六七八九十百千万零]+)\s*[章节卷回]/);
     if (m) return cnToInt(m[1]);
     var m2 = href.match(/[?&](?:id|chapterId)=(\d+)/i);
@@ -69,7 +73,7 @@
 
   // 导航/操作类链接标题（起点目录页常混入「旧版/下一章/上一章」等跳转链接，其 href 与真实章节相同）
   function isNavLabel(t) {
-    return /^(旧版|新版|下一章|上一章|下一节|上一节|下一页|上一页|目录|章节目录|章节列表|返回目录|返回书页|立即阅读|开始阅读|免费试读|试读|全文阅读|阅读全文|加入书架|书架|点击阅读|展开全部|收起)$/.test(t || "");
+    return /^(旧版|新版|下一章|上一章|下一节|上一节|下一页|上一页|目录|章节目录|章节列表|返回目录|返回书页|立即阅读|继续阅读|开始阅读|免费试读|试读|全文阅读|阅读全文|加入书架|书架|点击阅读|展开全部|收起)$/.test(t || "");
   }
 
   // 笔趣阁 biquga 分页目录（index_N.html / 「查看更多章节」）里章节链接是 JS 渲染：
@@ -125,7 +129,8 @@
       if (!abs) return;
       var cid = chapterId(href) || chapterId(abs);
       var key = cid ? ("cid:" + cid) : ("url:" + abs);
-      var entry = { chapter_title: title, chapter_index: extractIndex(title, href), source_url: abs };
+      var chIdx = extractIndex(title, href);
+      var entry = { chapter_title: title, chapter_index: chIdx, sort_index: cid ? parseInt(cid, 10) : chIdx, source_url: abs };
       var idx = indexByKey[key];
       if (idx !== undefined) {
         // 同一章重复出现（导航链接撞真实章节）：优先保留带「第X章」标题的条目
@@ -153,7 +158,8 @@
         if (!abs) return;
         var cid = chapterId(rel) || chapterId(abs);
         var key = cid ? ("cid:" + cid) : ("url:" + abs);
-        var entry = { chapter_title: title, chapter_index: extractIndex(title, rel), source_url: abs };
+        var chIdx = extractIndex(title, rel);
+        var entry = { chapter_title: title, chapter_index: chIdx, sort_index: cid ? parseInt(cid, 10) : chIdx, source_url: abs };
         var idx = indexByKey[key];
         if (idx !== undefined) {
           var prev = out[idx];
@@ -167,14 +173,21 @@
     return out;
   }
 
+  // 目录条目排序键：优先用单调递增的 sort_index（起点卷内章节号每卷从第一章重排，cid 才是唯一递增的阅读顺序）
+  function catalogSortKey(c) {
+    if (typeof c.sort_index === "number") return c.sort_index;
+    if (typeof c.chapter_index === "number") return c.chapter_index;
+    return null;
+  }
+
   // 取「最新 N 章」：全为数字序号时升序排序再取末尾（兼容目录倒序站点）；
   // 任一序号缺失则信任 DOM 顺序（默认目录按阅读顺序正序排列）。
   function selectLatest(list, n) {
     if (!list || !list.length) return [];
     var arr = list.slice();
-    var allNumeric = arr.every(function (c) { return typeof c.chapter_index === "number"; });
+    var allNumeric = arr.every(function (c) { return catalogSortKey(c) !== null; });
     if (allNumeric && arr.length > 1) {
-      arr.sort(function (a, b) { return a.chapter_index - b.chapter_index; });
+      arr.sort(function (a, b) { return catalogSortKey(a) - catalogSortKey(b); });
     }
     var count = Math.max(1, Math.min(n || 1, arr.length));
     return arr.slice(arr.length - count);
@@ -226,17 +239,30 @@
   }
 
   // 笔趣阁（biquga）目录分页入口：书页只显示「最新章节」，完整目录在 index_1.html…index_N.html。
-  // 从当前页 DOM 找「查看更多章节 / 章节目录」链接（href 指向 index 系列），统一归一为 index_1.html；
-  // 已在 index_N.html 页时，直接从当前 URL 派生。返回绝对 URL 或 null。
+  // biquga 旧格式 /{bid}_{aid}/ 的分页目录被服务端反爬（返回别的书），
+  // 但同书新格式 /book/{aid}/index_N.html 正常，故旧格式统一换算为新格式。返回绝对 URL 或 null。
   function biqugeCatalogEntryHref(doc, currentHref) {
+    var origin = ((currentHref || "").match(/^(https?:\/\/[^\/]+)/i) || [])[1] || "";
+    // 已在 index_N 页：直接派生 index_1（旧格式换算为新格式）
     var m = (currentHref || "").match(/^(.*?)\/index(?:_\d+)?\.html?$/i);
-    if (m) return m[1] + "/index_1.html";
+    if (m) {
+      var base = m[1];
+      var ob = base.match(/\/(\d+)_(\d+)$/i);
+      if (ob && origin) return origin + "/book/" + ob[2] + "/index_1.html";
+      return base + "/index_1.html";
+    }
+    // 旧格式书页 /{bid}_{aid}/ → 新格式分页入口，绕开反爬
+    var old = (currentHref || "").match(/\/(\d+)_(\d+)\/?$/i);
+    if (old && origin) return origin + "/book/" + old[2] + "/index_1.html";
     var anchors = doc.querySelectorAll("a[href]");
     for (var i = 0; i < anchors.length; i++) {
       var href = anchors[i].getAttribute("href");
       if (!href || !/index(?:_\d+)?\.html?$/i.test(href)) continue;
       var abs = absoluteUrl(doc, href, currentHref);
-      if (abs) return abs.replace(/index(?:_\d+)?\.html?$/i, "index_1.html");
+      if (!abs) continue;
+      var ob2 = abs.match(/\/(\d+)_(\d+)\/index(?:_\d+)?\.html?$/i);
+      if (ob2 && origin) return origin + "/book/" + ob2[2] + "/index_1.html";
+      return abs.replace(/index(?:_\d+)?\.html?$/i, "index_1.html");
     }
     return null;
   }
@@ -271,6 +297,7 @@
     looksLikeChapterHref: looksLikeChapterHref,
     isNavLabel: isNavLabel,
     chapterId: chapterId,
+    catalogSortKey: catalogSortKey,
     isPaywall: isPaywall,
     biqugeCatalogEntryHref: biqugeCatalogEntryHref,
     biqugeCatalogPageCount: biqugeCatalogPageCount,

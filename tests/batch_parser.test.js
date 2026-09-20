@@ -21,6 +21,41 @@ describe("extractIndex", () => {
   });
 });
 
+describe("extractIndex 番外排除", () => {
+  it("returns null for 番外/外传/后记/尾声 so they don't collide with main chapters", () => {
+    expect(P.extractIndex("番外 第一章", "/book/1/101.html")).toBe(null);
+    expect(P.extractIndex("外传 第二章", "/book/1/102.html")).toBe(null);
+    expect(P.extractIndex("后记", "/book/1/103.html")).toBe(null);
+    expect(P.extractIndex("尾声 感言", "/book/1/104.html")).toBe(null);
+  });
+  it("still extracts normal chapter numbers", () => {
+    expect(P.extractIndex("第一章 开端", "/book/1/101.html")).toBe(1);
+  });
+});
+
+describe("parseCatalog 番外与正文不混排", () => {
+  it("番外 chapter_index/sort_index 为 null，保留 DOM 阅读顺序", () => {
+    const html = `
+      <html><body>
+        <a href="/book/1/101.html">第一章 开端</a>
+        <a href="/book/1/102.html">第二章 转折</a>
+        <a href="/book/1/201.html">番外 第一章</a>
+        <a href="/book/1/202.html">番外 第二章</a>
+      </body></html>`;
+    const list = P.parseCatalog(html, "biquge");
+    expect(list.map((c) => c.chapter_title)).toEqual([
+      "第一章 开端",
+      "第二章 转折",
+      "番外 第一章",
+      "番外 第二章",
+    ]);
+    expect(list[2].chapter_index).toBe(null);
+    expect(list[2].sort_index).toBe(null);
+    expect(list[3].chapter_index).toBe(null);
+    expect(list[3].sort_index).toBe(null);
+  });
+});
+
 describe("parseCatalog", () => {
   it("extracts unique chapter list", () => {
     const html = `
@@ -33,6 +68,29 @@ describe("parseCatalog", () => {
     expect(list).toHaveLength(2);
     expect(list[0].chapter_index).toBe(1);
     expect(list[1].chapter_title).toBe("第二章 转折");
+  });
+
+  it("keeps qidian volume chapters in reading order via monotonic cid", () => {
+    const html = `
+      <html><body>
+        <a href="/chapter/1049996017/100/">第一章 觉醒</a>
+        <a href="/chapter/1049996017/101/">第二章 入门</a>
+        <a href="/chapter/1049996017/200/">第一章 重逢</a>
+        <a href="/chapter/1049996017/201/">第二章 决战</a>
+      </body></html>`;
+    const list = P.parseCatalog(html, "qidian");
+    expect(list).toHaveLength(4);
+    // 展示用的章节号仍取标题「第X章」（每卷从第一章重排）
+    expect(list.map((c) => c.chapter_index)).toEqual([1, 2, 1, 2]);
+    // 排序键用 cid（唯一递增），保证阅读顺序
+    expect(list.map((c) => c.sort_index)).toEqual([100, 101, 200, 201]);
+    const latest = P.selectLatest(list, 4);
+    expect(latest.map((c) => c.chapter_title)).toEqual([
+      "第一章 觉醒",
+      "第二章 入门",
+      "第一章 重逢",
+      "第二章 决战",
+    ]);
   });
 });
 
@@ -117,6 +175,34 @@ describe("parseCatalog qidian nav-link collision", () => {
     expect(P.isNavLabel("下一章")).toBe(true);
     expect(P.isNavLabel("上一章")).toBe(true);
     expect(P.isNavLabel("第一章 仙府")).toBe(false);
+  });
+});
+
+describe("zongheng catalog parsing", () => {
+  it("isNavLabel blocks 立即阅读/继续阅读 action buttons", () => {
+    expect(P.isNavLabel("立即阅读")).toBe(true);
+    expect(P.isNavLabel("继续阅读")).toBe(true);
+    expect(P.isNavLabel("第1章 仙门")).toBe(false);
+  });
+
+  it("chapterId parses read.zongheng.com /chapter/{book}/{cid}.html", () => {
+    expect(P.chapterId("//read.zongheng.com/chapter/1552353/94413899.html")).toBe("94413899");
+    expect(P.chapterId("/chapter/1552353/94413899.html")).toBe("94413899");
+  });
+
+  it("sorts by monotonic cid even when chapter numbers restart per volume", () => {
+    // 纵横目录分卷后「第X章」每卷重排，两个「第1章」标题号相同，但 cid 单调递增；
+    // 应按 cid 排序，而不是把标题号相同的章节挤到一起。
+    const html = `
+      <html><body>
+        <a href="//read.zongheng.com/chapter/1552353/110571591.html">第1章 丹药</a>
+        <a href="//read.zongheng.com/chapter/1552353/94413899.html">第1章 仙门</a>
+        <a href="//read.zongheng.com/chapter/1552353/94413906.html">第2章 考核</a>
+      </body></html>`;
+    const list = P.parseCatalog(html, "zongheng");
+    const sorted = list.slice().sort((a, b) => P.catalogSortKey(a) - P.catalogSortKey(b));
+    expect(sorted.map((c) => c.chapter_title)).toEqual(["第1章 仙门", "第2章 考核", "第1章 丹药"]);
+    expect(sorted[2].sort_index).toBe(110571591);
   });
 });
 
@@ -209,20 +295,26 @@ describe("biquga 目录/正文修复", () => {
 });
 
 describe("biquga 分页目录", () => {
-  it("biqugeCatalogEntryHref 从书页找「查看更多章节」入口并归一为 index_1.html", () => {
-    const doc = P.parseHtml('<a href="/46_46911/index_1.html">查看更多章节</a>');
-    const entry = P.biqugeCatalogEntryHref(doc, "https://www.biquga.com/46_46911/");
-    expect(entry).toBe("https://www.biquga.com/46_46911/index_1.html");
+  it("biqugeCatalogEntryHref 旧格式书页换算为新格式分页入口（绕开反爬）", () => {
+    const doc = P.parseHtml('<a href="/55_55383/index_1.html">查看更多章节</a>');
+    const entry = P.biqugeCatalogEntryHref(doc, "https://www.biquga.com/55_55383/");
+    expect(entry).toBe("https://www.biquga.com/book/55383/index_1.html");
   });
 
-  it("biqugeCatalogEntryHref 已在 index_N 页时直接派生 index_1.html", () => {
+  it("biqugeCatalogEntryHref 旧格式 index_N 页也换算为新格式 index_1", () => {
     const entry = P.biqugeCatalogEntryHref(null, "https://www.biquga.com/46_46911/index_5.html");
-    expect(entry).toBe("https://www.biquga.com/46_46911/index_1.html");
+    expect(entry).toBe("https://www.biquga.com/book/46911/index_1.html");
   });
 
-  it("biqugeCatalogEntryHref 无目录入口时返回 null", () => {
-    const doc = P.parseHtml('<a href="/46_46911/123456.html">第一章 开端</a>');
-    expect(P.biqugeCatalogEntryHref(doc, "https://www.biquga.com/46_46911/")).toBe(null);
+  it("biqugeCatalogEntryHref 新格式书页保持新格式 index_1 不变", () => {
+    const doc = P.parseHtml('<a href="/book/11763279/index_1.html">查看更多章节</a>');
+    const entry = P.biqugeCatalogEntryHref(doc, "https://www.biquga.com/book/11763279.html");
+    expect(entry).toBe("https://www.biquga.com/book/11763279/index_1.html");
+  });
+
+  it("biqugeCatalogEntryHref 新格式书页无目录入口时返回 null", () => {
+    const doc = P.parseHtml('<a href="/book/11763279/123456.html">第一章 开端</a>');
+    expect(P.biqugeCatalogEntryHref(doc, "https://www.biquga.com/book/11763279.html")).toBe(null);
   });
 
   it("biqugeCatalogPageCount 扫描分页链接取最大页码", () => {
