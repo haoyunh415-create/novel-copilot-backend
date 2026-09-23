@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.27
+// @version      2.3.28
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -123,7 +123,8 @@
   let network = null;
   let _currentBookId = (function () { try { var v = store.get("currentBookId"); return v ? parseInt(v, 10) : null; } catch (_) { return null; } })();
   let _currentBookTitle = (function () { try { return store.get("currentBookTitle") || null; } catch (_) { return null; } })();
-  let _graphMode = "chapter";  // "chapter" | "book"
+  let _graphMode = "chapter";  // "chapter" | "book" | "batch"
+  let _batchGraph = null;  // 批量分析合并后的全书关系图（切换「关系图」标签时优先展示）
   let _historySortMode = (function () { try { return localStorage.getItem("JL_HistSort") || "time"; } catch (_) { return "time"; } })();
   let _lastFailedQuestion = null;
   let _serverAnalysisMap = {};  // 章节→服务端分析数据映射
@@ -793,6 +794,7 @@
           '<div style="display:flex;justify-content:center;gap:8px;padding:8px 0">' +
             '<button id="jl-graph-chapter" class="jl-graph-toggle" style="background:#5D4037;color:#fff">当前章节</button>' +
             '<button id="jl-graph-book" class="jl-graph-toggle" style="background:#E8DDD2;color:#5D4037">全书累计</button>' +
+            '<button id="jl-graph-batch" class="jl-graph-toggle" style="background:#E8DDD2;color:#5D4037">本次批量</button>' +
           '</div>' +
           '<div id="jl-graph"></div></section><section id="jl-panel-weekly" class="jl-panel"><div class="jl-card"><h3>📊 本周阅读概览</h3><div id="jl-weekly-stats"></div></div><div class="jl-card"><h3>👥 最关注角色</h3><div id="jl-weekly-characters"></div></div><div class="jl-card"><h3>🔍 伏笔追踪</h3><div id="jl-weekly-clues"></div></div></section>' +
         '<section id="jl-panel-account" class="jl-panel">' +
@@ -886,6 +888,7 @@
     win.querySelector("#jl-full-report").addEventListener("click", fullReport);
     win.querySelector("#jl-graph-chapter").addEventListener("click", function () { setGraphMode("chapter"); });
     win.querySelector("#jl-graph-book").addEventListener("click", function () { setGraphMode("book"); });
+    win.querySelector("#jl-graph-batch").addEventListener("click", function () { setGraphMode("batch"); });
     win.querySelector("#jl-send-code").addEventListener("click", sendEmailCode);
     win.querySelector("#jl-login-btn").addEventListener("click", emailLogin);
     win.querySelector("#jl-logout").addEventListener("click", logout);
@@ -1350,21 +1353,31 @@
     });
   }
 
+  function renderBatchGraph() {
+    var graphBox = document.getElementById("jl-graph");
+    if (!graphBox) return;
+    if (!_batchGraph || !Array.isArray(_batchGraph.nodes) || _batchGraph.nodes.length === 0) {
+      graphBox.innerHTML = '<div class="jl-ov-empty">本次批量暂无人物关系数据</div>';
+      return;
+    }
+    drawGraph(_batchGraph);
+  }
+
   function setGraphMode(mode) {
     _graphMode = mode;
     var chapBtn = document.getElementById("jl-graph-chapter");
     var bookBtn = document.getElementById("jl-graph-book");
-    if (chapBtn && bookBtn) {
-      if (mode === "chapter") {
-        chapBtn.style.background = "#5D4037"; chapBtn.style.color = "#fff";
-        bookBtn.style.background = "#E8DDD2"; bookBtn.style.color = "#5D4037";
-        renderChapterGraph();
-      } else {
-        bookBtn.style.background = "#5D4037"; bookBtn.style.color = "#fff";
-        chapBtn.style.background = "#E8DDD2"; chapBtn.style.color = "#5D4037";
-        loadBookGraph();
-      }
+    var batchBtn = document.getElementById("jl-graph-batch");
+    function mark(active) {
+      [chapBtn, bookBtn, batchBtn].forEach(function (b) {
+        if (!b) return;
+        b.style.background = (b === active) ? "#5D4037" : "#E8DDD2";
+        b.style.color = (b === active) ? "#fff" : "#5D4037";
+      });
     }
+    if (mode === "chapter") { mark(chapBtn); renderChapterGraph(); }
+    else if (mode === "book") { mark(bookBtn); loadBookGraph(); }
+    else { mark(batchBtn); renderBatchGraph(); }
   }
 
   function storageKey() {
@@ -4484,6 +4497,8 @@
     if (prog) prog.remove();
     // 复用单章渲染管线：概况/伏笔/关系图都展示全书合并结果
     var mergedResult = mergedToResult();
+    _batchGraph = mergedResult.graph;
+    _graphMode = "batch";  // 关系图标签默认展示本次批量合并图，避免被「当前章节」覆盖
     renderResult(mergedResult);
     renderBatchChapterList();
     renderBatchSkipNote(analyzedCount, skippedAlready, skippedPaywall, skippedFetch, skippedError, failedChapters);
