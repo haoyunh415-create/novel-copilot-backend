@@ -1363,20 +1363,7 @@
       setText("#jl-summary", "操作太频繁了，稍等几秒再试。");
       return;
     }
-    lastCallTime = now;
-
-    const text = getChapterText();
-    if (isPaywall(document.body.innerText || "")) {
-      setText("#jl-summary", "🔒 疑似付费/会员章节，已跳过（未扣额度）。开通会员后可继续阅读，或换其它免费章节分析。");
-      return;
-    }
-    if (text.length < 80) {
-      setText("#jl-summary", isFanqieSite()
-        ? "⚠️ 番茄小说正文已加密，暂无法自动分析。\n\n请手动复制本章正文后粘贴重试，或换起点等其它网站。"
-        : "没有识别到足够的正文内容。");
-      return;
-    }
-
+    // 立即进入「运行中」状态并禁用按钮，避免正文抓取/起点解密期间重复点击触发「操作频繁」
     isRunning = true;
     const runBtn = document.getElementById("jl-run");
     runBtn.disabled = true;
@@ -1397,6 +1384,20 @@
     }
 
     try {
+      const text = getChapterText();
+      if (isPaywall(document.body.innerText || "")) {
+        setText("#jl-summary", "🔒 疑似付费/会员章节，已跳过（未扣额度）。开通会员后可继续阅读，或换其它免费章节分析。");
+        return;
+      }
+      if (text.length < 80) {
+        setText("#jl-summary", isFanqieSite()
+          ? "⚠️ 番茄小说正文已加密，暂无法自动分析。\n\n请手动复制本章正文后粘贴重试，或换起点等其它网站。"
+          : "没有识别到足够的正文内容。");
+        return;
+      }
+
+      lastCallTime = now;
+
       const chapterTitle = getChapterTitle();
       setText("#jl-heading", chapterTitle);
       setText("#jl-summary", "🤖 AI 正在分析…（" + getModeLabel() + "）");
