@@ -13,6 +13,7 @@
 // @match        *://*.17k.com/*
 // @match        *://*.jjwxc.net/*
 // @match        *://*.qimao.com/*
+// @match        *://*.book.qq.com/*
 // @match        *://*.fanqienovel.com/*
 // @match        *://*.biquga.com/*
 // @match        *://*.xbiquge.com/*
@@ -132,6 +133,12 @@
   // ═══════════ 页面信息提取 ═══════════
 
   function getChapterTitle() {
+    // QQ阅读：优先取 __NUXT__ 里的章节名，避免 document.title 里书名/站点后缀干扰
+    if (isQQBookSite()) {
+      var qd = getQQNuxtData();
+      var qt = qd && (qd.chapterTitle || qd.chapterName);
+      if (qt && String(qt).trim().length >= 2) return String(qt).trim().substring(0, 80);
+    }
     // SPA 优先：document.title 在导航后准确更新（如"第2章 劫修 - 起点"）
     var dt = document.title.trim();
     var m = dt.match(/第[0-9零一二三四五六七八九十百千]+[章节回]\s*.*?(?=在线免费阅读|免费阅读|在线阅读|最新章节|_|-|—|$)/);
@@ -258,6 +265,25 @@
       _cachedTextUrl = location.href;
       return "";
     }
+    // QQ阅读：正文在 window.__NUXT__.data[0].currentContent.content（HTML 字符串），VIP 加密章节直接返回空
+    if (isQQBookSite()) {
+      if (isQQBookLocked()) {
+        _cachedText = "";
+        _cachedTextUrl = location.href;
+        return "";
+      }
+      var qqd = getQQNuxtData();
+      var qqCc = qqd && qqd.currentContent;
+      if (qqCc && qqCc.content) {
+        var qqText = stripHtmlTags(qqCc.content);
+        qqText = (qqText || "").split("\n").map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 3; }).slice(0, 150).join("\n");
+        if (qqText.length >= 80) {
+          _cachedText = qqText;
+          _cachedTextUrl = location.href;
+          return qqText;
+        }
+      }
+    }
     // 移动端多章拼接修复：先尝试按章节边界截断
     var boundaryText = extractByChapterBoundary();
     if (boundaryText && boundaryText.length >= 80) return boundaryText;
@@ -331,6 +357,45 @@
     } catch (_) {
       return false;
     }
+  }
+
+  function isQQBookSite() {
+    try {
+      return /book\.qq\.com/i.test(location.hostname);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // QQ阅读为 Nuxt SSR 站点：正文/章节标题/章 ID 都在 window.__NUXT__ 里，DOM 选择器无法稳定命中
+  function getQQNuxtData() {
+    try {
+      var n = window.__NUXT__;
+      if (typeof n === "function") { try { n = n(); } catch (_) {} }
+      if (!n || typeof n !== "object") return null;
+      var d = n.data;
+      if (Array.isArray(d)) return d[0] || null;
+      return d || null;
+    } catch (_) { return null; }
+  }
+
+  // QQ阅读 VIP/会员章节正文为加密（encrypt）或字体混淆（fontEncrypt），油猴内无法解密
+  function isQQBookLocked() {
+    try {
+      var qd = getQQNuxtData();
+      var cc = qd && qd.currentContent;
+      return !!(cc && (cc.encrypt || cc.fontEncrypt));
+    } catch (_) { return false; }
+  }
+
+  // HTML 字符串剥标签还原纯文本（QQ阅读 currentContent.content 为 HTML）
+  function stripHtmlTags(s) {
+    if (!s) return "";
+    try {
+      var el = document.createElement("div");
+      el.innerHTML = s;
+      return (el.innerText || el.textContent || "");
+    } catch (_) { return ""; }
   }
 
   // ═══════════ 番茄小说字体解密 ═══════════
@@ -436,6 +501,14 @@
 
 
   function getBookTitle() {
+    // QQ阅读：书名在 og:novel:book_name meta（详情页/阅读页均有）
+    if (isQQBookSite()) {
+      var qbMeta = document.querySelector("meta[property='og:novel:book_name']");
+      var qbt = qbMeta ? (qbMeta.getAttribute("content") || "").trim() : "";
+      if (qbt) return qbt;
+      var qbd = getQQNuxtData();
+      if (qbd && (qbd.bookName || qbd.novelName)) return String(qbd.bookName || qbd.novelName).trim();
+    }
     const selectors = [
       ".muye-reader-nav-title",
       ".book-title", ".book-name", ".novel-title",
@@ -477,6 +550,12 @@
   }
 
   function getAuthor() {
+    // QQ阅读：作者在 og:novel:author meta
+    if (isQQBookSite()) {
+      var qaMeta = document.querySelector("meta[property='og:novel:author']");
+      var qat = qaMeta ? (qaMeta.getAttribute("content") || "").trim() : "";
+      if (qat) return qat;
+    }
     const selectors = [
       ".author", ".writer", ".book-author",
       "[class*='author']", "[class*='Author']",
@@ -491,6 +570,20 @@
   }
 
   function getChapterIndex() {
+    // QQ阅读：URL /book-read/{bookId}/{cid}/，cid 即章节唯一 ID（作为稳定排序/历史键）
+    if (isQQBookSite()) {
+      var qd = getQQNuxtData();
+      if (qd && qd.cid) {
+        var ci = parseInt(qd.cid, 10);
+        if (ci > 0 && ci < 100000000) return ci;
+      }
+      var qm = location.pathname.match(/\/book-read\/\d+\/(\d+)\/?/);
+      if (qm) {
+        var c2 = parseInt(qm[1], 10);
+        if (c2 > 0 && c2 < 100000000) return c2;
+      }
+      return null;
+    }
     const patterns = [
       /chapter[\/\-_]?(\d+)/i,
       /\/(\d+)\.html?/,
@@ -1125,6 +1218,10 @@
     }
 
     var text = getChapterText();
+    if (isQQBookSite() && isQQBookLocked()) {
+      setText("#jl-summary", "🔒 QQ阅读 该章节为 VIP/会员加密章节，暂无法自动分析（未扣额度）。\n\n请手动复制本章正文后粘贴重试，或换免费章节。");
+      return;
+    }
     if (window.JLBatchParser.isPaywall(document.body.innerText || "")) {
       setText("#jl-summary", "🔒 疑似付费/会员章节，已跳过（未扣额度）。开通会员后可继续阅读，或换其它免费章节分析。");
       return;
@@ -1430,6 +1527,10 @@
 
     try {
       const text = getChapterText();
+      if (isQQBookSite() && isQQBookLocked()) {
+        setText("#jl-summary", "🔒 QQ阅读 该章节为 VIP/会员加密章节，暂无法自动分析（未扣额度）。\n\n请手动复制本章正文后粘贴重试，或换免费章节。");
+        return;
+      }
       if (window.JLBatchParser.isPaywall(document.body.innerText || "")) {
         setText("#jl-summary", "🔒 疑似付费/会员章节，已跳过（未扣额度）。开通会员后可继续阅读，或换其它免费章节分析。");
         return;
@@ -3329,6 +3430,22 @@
     }
 
     function extractChapterText(html, site) {
+      if (site === "qqbook") {
+        // QQ阅读正文在 window.__NUXT__ 里（Nuxt SSR），VIP 加密章节返回空
+        var nuxtM = (html || "").match(/window\.__NUXT__\s*=\s*([\s\S]*?);?\s*<\/script>/i);
+        if (!nuxtM) return "";
+        try {
+          var val = (new Function("return (" + nuxtM[1] + ")"))();
+          if (typeof val === "function") val = val();
+          var d = val && val.data;
+          var block = Array.isArray(d) ? d[0] : d;
+          var cc = block && block.currentContent;
+          if (!cc || cc.encrypt || cc.fontEncrypt) return "";
+          var qdoc = parseHtml(cc.content || "");
+          var qtext = (qdoc.body && (qdoc.body.innerText || qdoc.body.textContent)) || "";
+          return qtext.split("\n").map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 3; }).join("\n");
+        } catch (_) { return ""; }
+      }
       var doc = parseHtml(html);
       var selectors = [
         "#content", "#chaptercontent", "#ChapterContent", "#txt",
@@ -3639,6 +3756,14 @@
       });
       return;
     }
+    // QQ阅读：目录在 /api/book/detail/chapters 接口，同样从接口取全书目录
+    if (/book\.qq\.com/i.test(location.hostname)) {
+      collectQqbookCatalog().then(function (all) {
+        if (all && all.length) { showBatchChapterPicker(all); return; }
+        jlModal({ title: "批量分析", message: "未解析到 QQ阅读 目录，请确认已打开书籍详情页或阅读页。" });
+      });
+      return;
+    }
     // 起点/纵横的「详情页」只展示部分章节（试读/最新章节），并非完整目录；
     // 先跳转到真正的目录页再解析，避免目录不全、排序错乱。
     var onCatalogPage = (site === "qidian" && /\/book\/\d+\/catalog\/?$/i.test(location.pathname)) ||
@@ -3707,6 +3832,44 @@
           source_url: "https://www.qimao.com/shuku/" + bookId + "-" + c.id + "/",
         };
       });
+      return list.length ? list : null;
+    } catch (_) {
+      return null;
+    } finally {
+      if (loading) loading.remove();
+    }
+  }
+
+  // QQ阅读全书目录：走章节列表接口 /api/book/detail/chapters?bid={bookId}（GET，同源携带 cookie）。
+  // 章节 URL 为 /book-read/{bookId}/{cid}/，cid 即接口返回的章节 id。
+  async function collectQqbookCatalog() {
+    var loading = showCatalogLoading();
+    try {
+      var m = location.pathname.match(/\/book-(?:detail|read)\/(\d+)/);
+      var bookId = m ? m[1] : null;
+      if (!bookId) {
+        var qd = getQQNuxtData();
+        bookId = qd && (qd.bookId || qd.novelId || (qd.currentContent && qd.currentContent.bookId));
+      }
+      if (!bookId) return null;
+      var resp = await fetchWithRetry(
+        "https://book.qq.com/api/book/detail/chapters?bid=" + bookId,
+        { credentials: "include" }, 2, 15000
+      );
+      var body = await resp.json();
+      var chapters = (body && body.data) || [];
+      if (!Array.isArray(chapters) || !chapters.length) return null;
+      var list = [];
+      for (var i = 0; i < chapters.length; i++) {
+        var c = chapters[i];
+        if (!c || c.cid === undefined || c.cid === null) continue;
+        list.push({
+          chapter_title: c.chapterName || ("第" + (i + 1) + "章"),
+          chapter_index: null,
+          sort_index: i,
+          source_url: "https://book.qq.com/book-read/" + bookId + "/" + c.cid + "/",
+        });
+      }
       return list.length ? list : null;
     } catch (_) {
       return null;
@@ -4047,6 +4210,7 @@
     if (/fanqienovel\.com/i.test(h)) return "fanqie";
     if (/qidian\.com/i.test(h)) return "qidian";
     if (/zongheng\.com/i.test(h)) return "zongheng";
+    if (/book\.qq\.com/i.test(h)) return "qqbook";
     return "biquge";
   }
 

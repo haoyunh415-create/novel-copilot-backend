@@ -194,6 +194,22 @@
   }
 
   function extractChapterText(html, site) {
+    if (site === "qqbook") {
+      // QQ阅读正文在 window.__NUXT__ 里（Nuxt SSR），VIP 加密章节返回空
+      var nuxtM = (html || "").match(/window\.__NUXT__\s*=\s*([\s\S]*?);?\s*<\/script>/i);
+      if (!nuxtM) return "";
+      try {
+        var val = (new Function("return (" + nuxtM[1] + ")"))();
+        if (typeof val === "function") val = val();
+        var d = val && val.data;
+        var block = Array.isArray(d) ? d[0] : d;
+        var cc = block && block.currentContent;
+        if (!cc || cc.encrypt || cc.fontEncrypt) return "";
+        var qdoc = parseHtml(cc.content || "");
+        var qtext = (qdoc.body && (qdoc.body.innerText || qdoc.body.textContent)) || "";
+        return qtext.split("\n").map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 3; }).join("\n");
+      } catch (_) { return ""; }
+    }
     var doc = parseHtml(html);
     var selectors = [
       "#content", "#chaptercontent", "#ChapterContent", "#txt",
