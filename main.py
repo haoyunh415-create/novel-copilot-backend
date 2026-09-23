@@ -1299,11 +1299,6 @@ def batch_create(req: BatchCreateRequest, user=Depends(get_user)):
     book_title = req.book_title or (first.chapter_title if first else "批量分析")
 
     with get_db() as conn:
-        analyzed_indexes = {
-            r["chapter_index"]
-            for r in conn.execute("SELECT chapter_index FROM analyses WHERE book_id=?", (book_id,)).fetchall()
-            if r["chapter_index"] is not None
-        }
         analyzed_urls = {
             r["source_url"]
             for r in conn.execute("SELECT source_url FROM analyses WHERE book_id=?", (book_id,)).fetchall()
@@ -1321,9 +1316,7 @@ def batch_create(req: BatchCreateRequest, user=Depends(get_user)):
         )
         job_id = cur.lastrowid
         for ch in req.chapter_list:
-            is_done = (ch.chapter_index is not None and ch.chapter_index in analyzed_indexes) or (
-                ch.source_url and ch.source_url in analyzed_urls
-            )
+            is_done = bool(ch.source_url and ch.source_url in analyzed_urls)
             status = "skipped" if is_done else "pending"
             if is_done:
                 skipped += 1

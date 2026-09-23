@@ -69,7 +69,15 @@
     _loadVisNetwork();
   }
 
-  // ═══════════ 环境适配层 ═══════════
+  
+  // 关系图库（vis-network）统一获取：兼容沙箱全局 vis 与页面 window.vis，避免误判未加载而降级为文字列表。
+  function getVis() {
+    if (typeof vis !== "undefined" && vis && vis.Network) return vis;
+    if (typeof window !== "undefined" && window.vis && window.vis.Network) return window.vis;
+    return null;
+  }
+
+// ═══════════ 环境适配层 ═══════════
   // 桌面油猴（Tampermonkey/Violentmonkey，同步 GM_*）：登录态跨小说站共享
   // Alook/Via/X浏览器（无 GM API）及 Greasemonkey 4 / iOS Userscripts（仅异步 GM.*）：
   // 降级 localStorage，登录态按站点隔离
@@ -1413,7 +1421,7 @@
   function drawGraph(graph) {
     const graphBox = document.getElementById("jl-graph");
     if (!graphBox) return;
-    if (!window.vis) {
+    if (!getVis()) {
       graphBox.innerHTML = '<div class="jl-ov-empty">图表库加载中，请稍后再试</div>';
       return;
     }
@@ -1436,7 +1444,7 @@
 
     const edges = Array.isArray(graph.edges) ? graph.edges : [];
     if (network) { network.destroy(); network = null; }
-    network = new vis.Network(graphBox, { nodes, edges }, {
+    network = new getVis().Network(graphBox, { nodes, edges }, {
       edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
       physics: { stabilization: true },
       interaction: { hover: true }
@@ -1465,7 +1473,7 @@
       graphBox.innerHTML = '<div class="jl-ov-empty">本章暂无人物关系数据</div>';
       return;
     }
-    if (!window.vis) { renderGraphAsText(graphBox, graph); return; }
+    if (!getVis()) { renderGraphAsText(graphBox, graph); return; }
     graphBox.innerHTML = "";
     graphBox.style.height = "560px";
     var nodes = graph.nodes.map(function (node) {
@@ -1483,7 +1491,7 @@
     });
     var edges = Array.isArray(graph.edges) ? graph.edges : [];
     if (network) { network.destroy(); network = null; }
-    network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
+    network = new getVis().Network(graphBox, { nodes: nodes, edges: edges }, {
       edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
       physics: { stabilization: true, barnesHut: { gravitationalConstant: -2000, springLength: 200 } },
       interaction: { hover: true, tooltipDelay: 200 }
@@ -1497,7 +1505,7 @@
       graphBox.innerHTML = '<div class="jl-ov-empty">本次批量暂无人物关系数据</div>';
       return;
     }
-    if (!window.vis) { renderGraphAsText(graphBox, _batchGraph); return; }
+    if (!getVis()) { renderGraphAsText(graphBox, _batchGraph); return; }
     drawGraph(_batchGraph);
   }
 
@@ -2477,7 +2485,7 @@
       });
 
       // 用 vis-network 渲染（当前环境不支持时降级为文字列表）
-      if (!window.vis) {
+      if (!getVis()) {
         renderGraphAsText(graphBox, { nodes: nodes, edges: edges });
         return;
       }
@@ -2485,7 +2493,7 @@
       graphBox.innerHTML = "";
       graphBox.style.height = "560px";
       if (network) { network.destroy(); network = null; }
-    network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
+    network = new getVis().Network(graphBox, { nodes: nodes, edges: edges }, {
         edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
         physics: { stabilization: true, barnesHut: { gravitationalConstant: -2000, springLength: 200 } },
         interaction: { hover: true, tooltipDelay: 200 }
@@ -3903,7 +3911,7 @@
         if (!c || c.cid === undefined || c.cid === null) continue;
         list.push({
           chapter_title: c.chapterName || ("第" + (i + 1) + "章"),
-          chapter_index: null,
+          chapter_index: i + 1,
           sort_index: i,
           source_url: "https://book.qq.com/book-read/" + bookId + "/" + c.cid + "/",
         });

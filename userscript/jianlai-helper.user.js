@@ -130,6 +130,14 @@
   let _lastFailedQuestion = null;
   let _serverAnalysisMap = {};  // 章节→服务端分析数据映射
 
+  // 关系图库（vis-network）统一获取：Tampermonkey 沙箱下 @require 的库挂在沙箱全局 `vis`（不在页面 window），
+  // GF/alook 版动态注入则挂在页面 window.vis。二者兼容，避免误判「图表库未加载」而降级为文字列表。
+  function getVis() {
+    if (typeof vis !== "undefined" && vis && vis.Network) return vis;
+    if (typeof window !== "undefined" && window.vis && window.vis.Network) return window.vis;
+    return null;
+  }
+
   // ═══════════ 页面信息提取 ═══════════
 
   function getChapterTitle() {
@@ -1373,7 +1381,7 @@
   function drawGraph(graph) {
     const graphBox = document.getElementById("jl-graph");
     if (!graphBox) return;
-    if (!window.vis) {
+    if (!getVis()) {
       graphBox.innerHTML = '<div class="jl-ov-empty">图表库加载中，请稍后再试</div>';
       return;
     }
@@ -1396,7 +1404,7 @@
 
     const edges = Array.isArray(graph.edges) ? graph.edges : [];
     if (network) { network.destroy(); network = null; }
-    network = new vis.Network(graphBox, { nodes, edges }, {
+    network = new getVis().Network(graphBox, { nodes, edges }, {
       edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
       physics: { stabilization: true },
       interaction: { hover: true }
@@ -1425,7 +1433,7 @@
       graphBox.innerHTML = '<div class="jl-ov-empty">本章暂无人物关系数据</div>';
       return;
     }
-    if (!window.vis) { renderGraphAsText(graphBox, graph); return; }
+    if (!getVis()) { renderGraphAsText(graphBox, graph); return; }
     graphBox.innerHTML = "";
     graphBox.style.height = "560px";
     var nodes = graph.nodes.map(function (node) {
@@ -1443,7 +1451,7 @@
     });
     var edges = Array.isArray(graph.edges) ? graph.edges : [];
     if (network) { network.destroy(); network = null; }
-    network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
+    network = new getVis().Network(graphBox, { nodes: nodes, edges: edges }, {
       edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
       physics: { stabilization: true, barnesHut: { gravitationalConstant: -2000, springLength: 200 } },
       interaction: { hover: true, tooltipDelay: 200 }
@@ -1457,7 +1465,7 @@
       graphBox.innerHTML = '<div class="jl-ov-empty">本次批量暂无人物关系数据</div>';
       return;
     }
-    if (!window.vis) { renderGraphAsText(graphBox, _batchGraph); return; }
+    if (!getVis()) { renderGraphAsText(graphBox, _batchGraph); return; }
     drawGraph(_batchGraph);
   }
 
@@ -2439,7 +2447,7 @@
       });
 
       // 用 vis-network 渲染（当前环境不支持时降级为文字列表）
-      if (!window.vis) {
+      if (!getVis()) {
         renderGraphAsText(graphBox, { nodes: nodes, edges: edges });
         return;
       }
@@ -2447,7 +2455,7 @@
       graphBox.innerHTML = "";
       graphBox.style.height = "560px";
       if (network) { network.destroy(); network = null; }
-    network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
+    network = new getVis().Network(graphBox, { nodes: nodes, edges: edges }, {
         edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
         physics: { stabilization: true, barnesHut: { gravitationalConstant: -2000, springLength: 200 } },
         interaction: { hover: true, tooltipDelay: 200 }
@@ -3865,7 +3873,7 @@
         if (!c || c.cid === undefined || c.cid === null) continue;
         list.push({
           chapter_title: c.chapterName || ("第" + (i + 1) + "章"),
-          chapter_index: null,
+          chapter_index: i + 1,
           sort_index: i,
           source_url: "https://book.qq.com/book-read/" + bookId + "/" + c.cid + "/",
         });
