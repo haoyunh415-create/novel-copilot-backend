@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.31
+// @version      2.3.32
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -1125,7 +1125,7 @@
     }
 
     var text = getChapterText();
-    if (isPaywall(document.body.innerText || "")) {
+    if (window.JLBatchParser.isPaywall(document.body.innerText || "")) {
       setText("#jl-summary", "🔒 疑似付费/会员章节，已跳过（未扣额度）。开通会员后可继续阅读，或换其它免费章节分析。");
       return;
     }
@@ -1430,7 +1430,7 @@
 
     try {
       const text = getChapterText();
-      if (isPaywall(document.body.innerText || "")) {
+      if (window.JLBatchParser.isPaywall(document.body.innerText || "")) {
         setText("#jl-summary", "🔒 疑似付费/会员章节，已跳过（未扣额度）。开通会员后可继续阅读，或换其它免费章节分析。");
         return;
       }
