@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.26
+// @version      2.3.27
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -252,7 +252,7 @@
       if (!container) continue;
       const paragraphs = container.querySelectorAll("p, div");
       const text = Array.from(paragraphs)
-        .map((p) => p.innerText?.trim() || "")
+        .map((p) => (p.innerText ? p.innerText.trim() : ""))
         .filter((t) => t.length > 5)
         .join("\n");
       if (text.length > bestText.length) bestText = text;
@@ -260,7 +260,7 @@
     if (bestText.length < 80) {
       const allP = document.querySelectorAll("p");
       const texts = Array.from(allP)
-        .map((p) => p.innerText?.trim() || "")
+        .map((p) => (p.innerText ? p.innerText.trim() : ""))
         .filter((t) => t.length > 8);
       bestText = texts.join("\n");
     }
@@ -415,11 +415,11 @@
       ".info h1", ".top h1", "#info h1", ".bookinfo h1", ".info h1 a",
     ];
     for (const sel of selectors) {
-      const text = document.querySelector(sel)?.innerText?.trim();
+      const text = ((document.querySelector(sel) || {}).innerText || "").trim();
       if (text && text.length >= 1 && text.length < 100) return text;
     }
     const meta = document.querySelector("meta[property='og:novel:book_name'], meta[name='book-name']");
-    const metaText = meta?.getAttribute("content")?.trim();
+    const metaText = (meta ? (meta.getAttribute("content") || "") : "").trim();
     if (metaText) return metaText;
     // 番茄小说兜底：document.title 格式 "{书名}第X章 {章节名}_番茄小说官网"
     if (/fanqienovel\.com/i.test(location.hostname)) {
@@ -451,11 +451,11 @@
       ".book-info .author", ".novel-info .author",
     ];
     for (const sel of selectors) {
-      const text = document.querySelector(sel)?.innerText?.trim();
+      const text = ((document.querySelector(sel) || {}).innerText || "").trim();
       if (text && text.length >= 1 && text.length < 50) return text;
     }
     const meta = document.querySelector("meta[property='og:novel:author'], meta[name='author']");
-    return meta?.getAttribute("content")?.trim() || "";
+    return (meta ? (meta.getAttribute("content") || "") : "").trim();
   }
 
   function getChapterIndex() {
@@ -477,7 +477,7 @@
       "[class*='chapterIdx']", "[class*='chapter_index']",
     ];
     for (const sel of domSelectors) {
-      const text = document.querySelector(sel)?.innerText;
+      const text = (document.querySelector(sel) || {}).innerText;
       if (text) {
         const idx = parseInt(text.replace(/[^0-9]/g, ""), 10);
         if (idx > 0 && idx < 100000) return idx;
@@ -600,7 +600,7 @@
   function createList(items, formatter, emptyText) {
     const list = document.createElement("div");
     list.className = "jl-list";
-    if (!items?.length) {
+    if (!items || !items.length) {
       const empty = document.createElement("p");
       empty.className = "jl-empty";
       empty.textContent = emptyText || "暂无明显线索";
@@ -700,7 +700,7 @@
 
     const style = document.createElement("style");
     style.id = "jianlai-helper-style";
-    style.textContent = "#jianlai-helper-window{position:fixed;top:16px;right:16px;width:min(480px,calc(100vw - 32px));height:min(780px,calc(100vh - 32px));z-index:2147483647;display:flex;flex-direction:column;color:#2C2416;background:linear-gradient(180deg,#FBF8F0,#F5EDE0);border:1px solid #D7CCC8;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.08);overflow:hidden;font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;animation:jlFadeIn .25s ease}#jianlai-helper-window button{border:0;border-radius:8px;cursor:pointer;font:inherit;transition:all .18s ease}#jianlai-helper-window button:active{transform:scale(.97)}@keyframes jlFadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}.jl-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;color:#fff;background:linear-gradient(135deg,#3E2723,#5D4037,#6D4C41)}.jl-title{min-width:0}.jl-title strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;font-weight:700;letter-spacing:.5px}.jl-title span{display:block;margin-top:3px;opacity:.7;font-size:11px}#jl-close{width:30px;height:30px;color:#fff;background:rgba(255,255,255,.12);border-radius:50%!important;font-size:18px;display:flex;align-items:center;justify-content:center}#jl-close:hover{background:rgba(255,255,255,.22)}.jl-tabs{display:grid;grid-template-columns:repeat(6,1fr);gap:0;background:#D7CCC8;padding:1px 0 0 0}.jl-tab{padding:11px 4px;color:#6D4C41;background:#EFEBE4;font-size:12px;font-weight:500;position:relative}.jl-tab:hover{background:#E8E0D5}.jl-tab.is-active{color:#fff;background:linear-gradient(180deg,#6D4C41,#5D4037);font-weight:600}.jl-tab.is-active::after{content:'';position:absolute;bottom:0;left:30%;right:30%;height:2px;background:#FFCC80;border-radius:2px}.jl-main{flex:1;min-height:0;overflow:auto;padding:16px;scroll-behavior:smooth}.jl-main::-webkit-scrollbar{width:5px}.jl-main::-webkit-scrollbar-thumb{background:#D7CCC8;border-radius:3px}.jl-panel{display:none;animation:jlFadeIn .2s ease}.jl-panel.is-active{display:block}.jl-card{margin-bottom:14px;padding:14px 16px;border:1px solid #E8DDD2;border-radius:10px;background:#FFFDF7;box-shadow:0 1px 4px rgba(44,36,22,.04);transition:box-shadow .2s}.jl-card:hover{box-shadow:0 2px 8px rgba(44,36,22,.08)}.jl-card h3{margin:0 0 10px;font-size:14px;font-weight:700;color:#3E2723}.jl-card p,.jl-list-item{margin:0;font-size:13px;line-height:1.7;color:#4E3E33}.jl-list-item{padding:10px 0;border-top:1px solid #F0E8DE}.jl-list-item:first-child{border-top:0}.jl-empty{color:#A1887F;font-size:13px;text-align:center;padding:20px}.jl-ask-box{display:grid;gap:10px}#jl-question{width:100%;min-height:80px;padding:12px;resize:vertical;border:1.5px solid #DDD0C4;border-radius:8px;color:#2C2416;background:#fff;font:inherit;font-size:13px;line-height:1.6;transition:border-color .2s}#jl-question:focus{outline:none;border-color:#8D6E63;box-shadow:0 0 0 3px rgba(141,110,99,.08)}#jl-ask{min-height:38px;color:#fff;background:linear-gradient(135deg,#5D4037,#6D4C41);font-weight:600}#jl-answer{white-space:pre-wrap}#jl-graph{height:580px;border:1px solid #E8DDD2;border-radius:10px;background:#FFFDF7;overflow:hidden}.jl-footer{display:flex;flex-direction:column;gap:10px;padding:12px 14px;border-top:1px solid #E8DDD2;background:#F5EDE0}.jl-controls{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}.jl-controls select{width:100%;min-height:36px;padding:6px 10px;border:1.5px solid #DDD0C4;border-radius:8px;color:#3E2723;background:#fff;font:inherit;font-size:13px;cursor:pointer;transition:border-color .2s}.jl-controls select:focus{outline:none;border-color:#8D6E63}.jl-toggle{display:flex;align-items:center;gap:6px;white-space:nowrap;color:#6D4C41;font-size:12px;cursor:pointer}.jl-actions{display:flex;gap:8px}.jl-footer button{min-height:38px;padding:8px 12px;font-size:13px;font-weight:600}#jl-run{flex:1;color:#fff;background:linear-gradient(135deg,#E65100,#F57C00);box-shadow:0 2px 8px rgba(230,81,0,.2)}#jl-run:hover{box-shadow:0 4px 14px rgba(230,81,0,.3)}#jl-review{flex:1;color:#fff;background:#6D4C41}#jl-full-report{flex:1;color:#fff;background:#8D6E63}#jl-export{width:60px;color:#5D4037;background:#E8DDD2}#jl-run:disabled{opacity:.6;cursor:wait;filter:grayscale(30%)}.jl-meta{margin-bottom:10px;padding:6px 10px;border-radius:6px;background:#F5EDE0;color:#8D6E63;font-size:11px;display:inline-block}.jl-book-bar{padding:8px 16px;background:linear-gradient(90deg,#F5EDE0,#EFEBE4);font-size:11px;color:#6D4C41;border-bottom:1px solid #E8DDD2;display:flex;align-items:center;gap:6px}.jl-book-bar::before{content:'📖';font-size:13px}.jl-ov-stat{display:inline-flex;align-items:center;gap:5px;margin:4px 14px 4px 0;font-size:12px;font-weight:500}.jl-ov-dot{width:9px;height:9px;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,.15)}.jl-ov-dot.open{background:#E65100}.jl-ov-dot.progress{background:#1565C0}.jl-ov-dot.payoff{background:#2E7D32}.jl-ov-item{padding:12px 14px;margin-bottom:10px;border-radius:10px;border:1px solid #E8DDD2;background:#FFFDF7;cursor:pointer;transition:all .15s}.jl-ov-item:hover{border-color:#8D6E63;box-shadow:0 2px 8px rgba(44,36,22,.06);transform:translateX(2px)}.jl-ov-item .jl-ov-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}.jl-ov-item .jl-ov-clue{font-size:13px;font-weight:600;color:#3E2723}.jl-ov-item .jl-ov-confidence{font-size:10px;padding:2px 10px;border-radius:12px;font-weight:600}.jl-ov-item .jl-ov-reason{font-size:12px;color:#6D4C41;margin-top:6px}.jl-ov-item .jl-ov-chapter{font-size:11px;color:#A1887F;margin-top:4px}.jl-ov-empty{text-align:center;padding:40px 20px;color:#A1887F;font-size:13px}.jl-qa-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.jl-qa-header h3{margin:0}.jl-qa-book-tag{padding:3px 10px;border-radius:12px;background:#EFEBE4;color:#6D4C41;font-size:11px;font-weight:500}.jl-chat-msg{margin-bottom:10px;padding:10px 12px;border-radius:10px;font-size:13px;line-height:1.6;animation:jlFadeIn .2s ease}.jl-chat-msg.q{background:#F5EDE0;border:1px solid #E8DDD2}.jl-chat-msg.a{background:#E8F5E9;border:1px solid #C8E6C9}.jl-chat-msg .jl-chat-label{font-weight:700;font-size:10px;margin-bottom:4px;display:block;text-transform:uppercase;letter-spacing:.5px}.jl-chat-msg.q .jl-chat-label{color:#5D4037}.jl-chat-msg.a .jl-chat-label{color:#2E7D32}.jl-chat-warning{padding:8px 12px;margin-bottom:10px;border-radius:8px;background:#FFF8E1;border:1px solid #FFE082;color:#E65100;font-size:12px}.jl-suggested{margin-bottom:12px}.jl-suggested-label{font-size:11px;color:#A1887F;margin-bottom:6px}.jl-suggested-item{display:block;width:100%;padding:8px 10px;margin-bottom:4px;border:1px solid #E8DDD2!important;border-radius:8px!important;background:#FFFDF7;color:#5D4037;font-size:12px;text-align:left;cursor:pointer}.jl-suggested-item:hover{background:#F5EDE0;border-color:#8D6E63!important}.jl-text-btn{display:block;width:100%;margin-top:8px;padding:4px 8px;border:0;background:0 0;color:#A1887F;font-size:11px;text-align:center;cursor:pointer}.jl-text-btn:hover{color:#C62828}.jl-qa-buttons{display:flex;gap:8px}.jl-qa-buttons button{flex:1;min-height:36px;padding:8px 12px;font-size:13px}#jl-ask{color:#fff;background:linear-gradient(135deg,#5D4037,#6D4C41)}#jl-suggest-btn{color:#5D4037;background:#EFEBE4;border:1.5px solid #D7CCC8!important}#jl-ask:disabled,#jl-suggest-btn:disabled{opacity:.6;cursor:wait}#jl-clear-batch:hover{background:#F5EDE0!important;border-color:#E65100!important;color:#E65100!important}";
+    style.textContent = "#jianlai-helper-window{position:fixed;top:16px;right:16px;width:min(480px,calc(100vw - 32px));height:min(780px,calc(100vh - 32px));z-index:2147483647;display:flex;flex-direction:column;color:#2C2416;background:linear-gradient(180deg,#FBF8F0,#F5EDE0);border:1px solid #D7CCC8;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.08);overflow:hidden;font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;animation:jlFadeIn .25s ease}#jianlai-helper-window button{border:0;border-radius:8px;cursor:pointer;font:inherit;transition:all .18s ease}#jianlai-helper-window button:active{transform:scale(.97)}@keyframes jlFadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}.jl-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;color:#fff;background:linear-gradient(135deg,#3E2723,#5D4037,#6D4C41)}.jl-title{min-width:0}.jl-title strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;font-weight:700;letter-spacing:.5px}.jl-title span{display:block;margin-top:3px;opacity:.7;font-size:11px}#jl-close{width:30px;height:30px;color:#fff;background:rgba(255,255,255,.12);border-radius:50%!important;font-size:18px;display:flex;align-items:center;justify-content:center}#jl-close:hover{background:rgba(255,255,255,.22)}.jl-tabs{display:grid;grid-template-columns:repeat(6,1fr);gap:0;background:#D7CCC8;padding:1px 0 0 0}.jl-tab{padding:11px 4px;color:#6D4C41;background:#EFEBE4;font-size:12px;font-weight:500;position:relative}.jl-tab:hover{background:#E8E0D5}.jl-tab.is-active{color:#fff;background:linear-gradient(180deg,#6D4C41,#5D4037);font-weight:600}.jl-tab.is-active::after{content:'';position:absolute;bottom:0;left:30%;right:30%;height:2px;background:#FFCC80;border-radius:2px}.jl-main{flex:1;min-height:0;overflow:auto;padding:16px;scroll-behavior:smooth}.jl-main::-webkit-scrollbar{width:5px}.jl-main::-webkit-scrollbar-thumb{background:#D7CCC8;border-radius:3px}.jl-panel{display:none;animation:jlFadeIn .2s ease}.jl-panel.is-active{display:block}.jl-card{margin-bottom:14px;padding:14px 16px;border:1px solid #E8DDD2;border-radius:10px;background:#FFFDF7;box-shadow:0 1px 4px rgba(44,36,22,.04);transition:box-shadow .2s}.jl-card:hover{box-shadow:0 2px 8px rgba(44,36,22,.08)}.jl-card h3{margin:0 0 10px;font-size:14px;font-weight:700;color:#3E2723}.jl-card p,.jl-list-item{margin:0;font-size:13px;line-height:1.7;color:#4E3E33}.jl-list-item{padding:10px 0;border-top:1px solid #F0E8DE}.jl-list-item:first-child{border-top:0}.jl-empty{color:#A1887F;font-size:13px;text-align:center;padding:20px}.jl-ask-box{display:grid;gap:10px}#jl-question{width:100%;min-height:80px;padding:12px;resize:vertical;border:1.5px solid #DDD0C4;border-radius:8px;color:#2C2416;background:#fff;font:inherit;font-size:13px;line-height:1.6;transition:border-color .2s}#jl-question:focus{outline:none;border-color:#8D6E63;box-shadow:0 0 0 3px rgba(141,110,99,.08)}#jl-ask{min-height:38px;color:#fff;background:linear-gradient(135deg,#5D4037,#6D4C41);font-weight:600}#jl-answer{white-space:pre-wrap}#jl-graph{height:580px;border:1px solid #E8DDD2;border-radius:10px;background:#FFFDF7;overflow:hidden}.jl-footer{display:flex;flex-direction:column;gap:10px;padding:12px 14px;border-top:1px solid #E8DDD2;background:#F5EDE0}.jl-controls{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}.jl-controls select{width:100%;min-height:36px;padding:6px 10px;border:1.5px solid #DDD0C4;border-radius:8px;color:#3E2723;background:#fff;font:inherit;font-size:13px;cursor:pointer;transition:border-color .2s}.jl-controls select:focus{outline:none;border-color:#8D6E63}.jl-toggle{display:flex;align-items:center;gap:6px;white-space:nowrap;color:#6D4C41;font-size:12px;cursor:pointer}#jl-spoiler-free{-webkit-appearance:none!important;appearance:none!important;display:block!important;width:16px!important;height:16px!important;margin:0!important;padding:0!important;flex:0 0 auto!important;box-sizing:border-box!important;border:1.5px solid #B08968!important;border-radius:4px!important;background-color:#fff!important;background-size:12px 12px!important;background-position:center!important;background-repeat:no-repeat!important;opacity:1!important;visibility:visible!important;cursor:pointer!important}#jl-spoiler-free:hover{border-color:#E65100!important}#jl-spoiler-free:checked{background-color:#E65100!important;border-color:#E65100!important;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E\")!important}.jl-actions{display:flex;gap:8px}.jl-footer button{min-height:38px;padding:8px 12px;font-size:13px;font-weight:600}#jl-run{flex:1;color:#fff;background:linear-gradient(135deg,#E65100,#F57C00);box-shadow:0 2px 8px rgba(230,81,0,.2)}#jl-run:hover{box-shadow:0 4px 14px rgba(230,81,0,.3)}#jl-review{flex:1;color:#fff;background:#6D4C41}#jl-full-report{flex:1;color:#fff;background:#8D6E63}#jl-export{width:60px;color:#5D4037;background:#E8DDD2}#jl-run:disabled{opacity:.6;cursor:wait;filter:grayscale(30%)}.jl-meta{margin-bottom:10px;padding:6px 10px;border-radius:6px;background:#F5EDE0;color:#8D6E63;font-size:11px;display:inline-block}.jl-book-bar{padding:8px 16px;background:linear-gradient(90deg,#F5EDE0,#EFEBE4);font-size:11px;color:#6D4C41;border-bottom:1px solid #E8DDD2;display:flex;align-items:center;gap:6px}.jl-book-bar::before{content:'📖';font-size:13px}.jl-ov-stat{display:inline-flex;align-items:center;gap:5px;margin:4px 14px 4px 0;font-size:12px;font-weight:500}.jl-ov-dot{width:9px;height:9px;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,.15)}.jl-ov-dot.open{background:#E65100}.jl-ov-dot.progress{background:#1565C0}.jl-ov-dot.payoff{background:#2E7D32}.jl-ov-item{padding:12px 14px;margin-bottom:10px;border-radius:10px;border:1px solid #E8DDD2;background:#FFFDF7;cursor:pointer;transition:all .15s}.jl-ov-item:hover{border-color:#8D6E63;box-shadow:0 2px 8px rgba(44,36,22,.06);transform:translateX(2px)}.jl-ov-item .jl-ov-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}.jl-ov-item .jl-ov-clue{font-size:13px;font-weight:600;color:#3E2723}.jl-ov-item .jl-ov-confidence{font-size:10px;padding:2px 10px;border-radius:12px;font-weight:600}.jl-ov-item .jl-ov-reason{font-size:12px;color:#6D4C41;margin-top:6px}.jl-ov-item .jl-ov-chapter{font-size:11px;color:#A1887F;margin-top:4px}.jl-ov-empty{text-align:center;padding:40px 20px;color:#A1887F;font-size:13px}.jl-qa-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.jl-qa-header h3{margin:0}.jl-qa-book-tag{padding:3px 10px;border-radius:12px;background:#EFEBE4;color:#6D4C41;font-size:11px;font-weight:500}.jl-chat-msg{margin-bottom:10px;padding:10px 12px;border-radius:10px;font-size:13px;line-height:1.6;animation:jlFadeIn .2s ease}.jl-chat-msg.q{background:#F5EDE0;border:1px solid #E8DDD2}.jl-chat-msg.a{background:#E8F5E9;border:1px solid #C8E6C9}.jl-chat-msg .jl-chat-label{font-weight:700;font-size:10px;margin-bottom:4px;display:block;text-transform:uppercase;letter-spacing:.5px}.jl-chat-msg.q .jl-chat-label{color:#5D4037}.jl-chat-msg.a .jl-chat-label{color:#2E7D32}.jl-chat-warning{padding:8px 12px;margin-bottom:10px;border-radius:8px;background:#FFF8E1;border:1px solid #FFE082;color:#E65100;font-size:12px}.jl-suggested{margin-bottom:12px}.jl-suggested-label{font-size:11px;color:#A1887F;margin-bottom:6px}.jl-suggested-item{display:block;width:100%;padding:8px 10px;margin-bottom:4px;border:1px solid #E8DDD2!important;border-radius:8px!important;background:#FFFDF7;color:#5D4037;font-size:12px;text-align:left;cursor:pointer}.jl-suggested-item:hover{background:#F5EDE0;border-color:#8D6E63!important}.jl-text-btn{display:block;width:100%;margin-top:8px;padding:4px 8px;border:0;background:0 0;color:#A1887F;font-size:11px;text-align:center;cursor:pointer}.jl-text-btn:hover{color:#C62828}.jl-qa-buttons{display:flex;gap:8px}.jl-qa-buttons button{flex:1;min-height:36px;padding:8px 12px;font-size:13px}#jl-ask{color:#fff;background:linear-gradient(135deg,#5D4037,#6D4C41)}#jl-suggest-btn{color:#5D4037;background:#EFEBE4;border:1.5px solid #D7CCC8!important}#jl-ask:disabled,#jl-suggest-btn:disabled{opacity:.6;cursor:wait}#jl-clear-batch:hover{background:#F5EDE0!important;border-color:#E65100!important;color:#E65100!important}";
     // 脚本版补充样式：账号面板控件 + 手机小屏全屏化
     style.textContent += "#jianlai-helper-window .jl-input{width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid #DDD0C4;border-radius:8px;color:#2C2416;background:#fff;font:inherit;font-size:13px}#jianlai-helper-window .jl-input:focus{outline:none;border-color:#8D6E63}#jianlai-helper-window .jl-btn-main{display:block;width:100%;margin-top:10px;min-height:40px;color:#fff;background:linear-gradient(135deg,#5D4037,#6D4C41);font-weight:600;font-size:14px}#jianlai-helper-window .jl-btn-plain{min-height:38px;padding:8px 12px;color:#5D4037;background:#E8DDD2;font-size:12px;white-space:nowrap}#jianlai-helper-window .jl-btn-main:disabled,#jianlai-helper-window .jl-btn-plain:disabled{opacity:.6;cursor:wait}@media (max-width:520px){#jianlai-helper-window{top:0;right:0;width:100vw;height:100vh;border-radius:0;border:0}.jl-tab{padding:12px 1px;font-size:11px}.jl-footer button{min-height:44px}#jl-graph{height:420px}}";
     document.documentElement.appendChild(style);
@@ -909,7 +909,7 @@
   // ═══════════ 渲染 ═══════════
 
   function normalizeResult(data) {
-    const result = data?.result || data || {};
+    const result = (data && data.result) || data || {};
     return {
       summary: result.summary || "暂无概况",
       characters: Array.isArray(result.characters) ? result.characters : [],
@@ -1232,7 +1232,7 @@
       graphBox.innerHTML = '<div class="jl-ov-empty">图表库加载中，请稍后再试</div>';
       return;
     }
-    if (!Array.isArray(graph?.nodes) || graph.nodes.length === 0) {
+    if (!Array.isArray(graph && graph.nodes) || (graph && graph.nodes && graph.nodes.length === 0)) {
       graphBox.innerHTML = '<div class="jl-ov-empty">本章暂无人物关系数据</div>';
       return;
     }
@@ -3357,7 +3357,7 @@
       return max > 0 ? max : 1;
     }
 
-    globalThis.JLBatchParser = {
+    window.JLBatchParser = {
       parseHtml: parseHtml,
       parseCatalog: parseCatalog,
       selectLatest: selectLatest,
@@ -3385,9 +3385,9 @@
     var n = 0;
     for (var i = 0; i < links.length; i++) {
       var a = links[i];
-      var title = globalThis.JLBatchParser.cleanTitle(a.textContent || a.getAttribute("title"));
+      var title = window.JLBatchParser.cleanTitle(a.textContent || a.getAttribute("title"));
       var href = a.getAttribute("href");
-      if (globalThis.JLBatchParser.isChapterTitle(title) || globalThis.JLBatchParser.looksLikeChapterHref(href)) n++;
+      if (window.JLBatchParser.isChapterTitle(title) || window.JLBatchParser.looksLikeChapterHref(href)) n++;
     }
     return n;
   }
@@ -3426,7 +3426,9 @@
       "#jl-batch-picker-mask .jlbp-list::-webkit-scrollbar-thumb{background:#D7CCC8;border-radius:3px}" +
       "#jl-batch-picker-mask .jlbp-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .12s ease}" +
       "#jl-batch-picker-mask .jlbp-item:hover{background:#FFF3E0}" +
-      "#jl-batch-picker-mask .jlbp-check{width:16px;height:16px;flex:0 0 auto;accent-color:#E65100;cursor:pointer}" +
+      "#jl-batch-picker-mask .jlbp-check{-webkit-appearance:none!important;appearance:none!important;display:block!important;width:18px!important;height:18px!important;margin:0!important;padding:0!important;flex:0 0 auto!important;box-sizing:border-box!important;border:1.5px solid #B08968!important;border-radius:5px!important;background-color:#fff!important;background-size:14px 14px!important;background-position:center!important;background-repeat:no-repeat!important;opacity:1!important;visibility:visible!important;cursor:pointer!important}" +
+      "#jl-batch-picker-mask .jlbp-check:hover{border-color:#E65100!important}" +
+      "#jl-batch-picker-mask .jlbp-check:checked{background-color:#E65100!important;border-color:#E65100!important;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E\")!important}" +
       "#jl-batch-picker-mask .jlbp-idx{flex:0 0 auto;min-width:52px;padding:2px 8px;border-radius:10px;background:#EFEBE4;color:#8D6E63;font-size:11px;text-align:center}" +
       "#jl-batch-picker-mask .jlbp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#3E2723;font-size:13px}" +
       "#jl-batch-picker-mask .jlbp-footer{display:flex;gap:10px;padding:12px 16px;border-top:1px solid #E8DDD2;background:#F5EDE0}" +
@@ -3444,7 +3446,7 @@
 
     // 排序：与 selectLatest 一致 —— 全数字序号则升序，否则信任 DOM 阅读顺序
     var sorted = all.slice();
-    var catKey = (globalThis.JLBatchParser && globalThis.JLBatchParser.catalogSortKey) || function (c) { return (typeof c.sort_index === "number") ? c.sort_index : c.chapter_index; };
+    var catKey = (window.JLBatchParser && window.JLBatchParser.catalogSortKey) || function (c) { return (typeof c.sort_index === "number") ? c.sort_index : c.chapter_index; };
     var allNumeric = sorted.every(function (c) { return typeof catKey(c) === "number"; });
     if (allNumeric && sorted.length > 1) {
       sorted.sort(function (a, b) { return catKey(a) - catKey(b); });
@@ -3593,7 +3595,7 @@
         var onDone = function (all) {
           if (all && all.length) { showBatchChapterPicker(all); return; }
           var html = document.documentElement.outerHTML;
-          var cur = globalThis.JLBatchParser.parseCatalog(html, site);
+          var cur = window.JLBatchParser.parseCatalog(html, site);
           if (!cur.length) {
             jlModal({ title: "批量分析", message: "未在目录页解析到章节列表，请刷新后重试。" });
             return;
@@ -3604,7 +3606,7 @@
         return;
       }
       var html = document.documentElement.outerHTML;
-      var all = globalThis.JLBatchParser.parseCatalog(html, site);
+      var all = window.JLBatchParser.parseCatalog(html, site);
       if (!all.length) {
         jlModal({ title: "批量分析", message: "未在目录页解析到章节列表，请刷新后重试。" });
         return;
@@ -3656,7 +3658,7 @@
   // 再若存在「查看更多章节 / index_N」分页入口则逐页抓取补充（read_tz 渲染的其余章节），
   // 并校验抓取页 read_aid 与当前书 ID 一致，防止反爬返回别本书污染目录。
   async function collectBiqugeCatalog() {
-    var P = globalThis.JLBatchParser;
+    var P = window.JLBatchParser;
     var site = "biquge";
     var loading = showCatalogLoading();
     var partial = false; // 是否因反爬只读到部分目录（书页之外的章节缺失）
@@ -4006,16 +4008,16 @@
     }
     if (site === "biquge") {
       // 笔趣阁 biquga 正文是 document.writeln(qsbs.bb('BASE64'))，先解码再提正文
-      var decoded = globalThis.JLBatchParser.decodeBiqugeBase64(html);
+      var decoded = window.JLBatchParser.decodeBiqugeBase64(html);
       if (decoded) html = decoded;
     }
-    var text = globalThis.JLBatchParser.extractChapterText(html, site);
+    var text = window.JLBatchParser.extractChapterText(html, site);
     if (site === "fanqie") text = decodeFanqieText(text);
     // JS 动态渲染站点（七猫/番茄等）：raw HTML 拿不到正文（<300 字），同域改走 iframe 让浏览器渲染后再提
     if (!text || text.length < 300) {
       return fetchChapterViaIframe(source_url, site);
     }
-    return { text: text, paywall: globalThis.JLBatchParser.isPaywall(html) };
+    return { text: text, paywall: window.JLBatchParser.isPaywall(html) };
   }
 
   function fetchChapterViaIframe(source_url, site) {
@@ -4041,8 +4043,8 @@
           var bt = (doc.body && doc.body.innerText) || "";
           if (bt.length >= 300 || Date.now() >= deadline) {
             var html = doc.documentElement.outerHTML;
-            var text = globalThis.JLBatchParser.extractChapterText(html, site);
-            done(text, globalThis.JLBatchParser.isPaywall(html));
+            var text = window.JLBatchParser.extractChapterText(html, site);
+            done(text, window.JLBatchParser.isPaywall(html));
             return;
           }
           setTimeout(read, 400);
