@@ -24,7 +24,6 @@
 // @match        *://*.bqgoo.cc/*
 // @match        *://*.pinggoua.com/*
 // @match        *://*.yckceo.com/*
-// @require      https://jianla.xyz/static/vis-network.min.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
@@ -130,11 +129,45 @@
   let _lastFailedQuestion = null;
   let _serverAnalysisMap = {};  // 章节→服务端分析数据映射
 
-  // 关系图库（vis-network）统一获取：Tampermonkey 沙箱下 @require 的库挂在沙箱全局 `vis`（不在页面 window），
-  // GF/alook 版动态注入则挂在页面 window.vis。二者兼容，避免误判「图表库未加载」而降级为文字列表。
+  // 动态加载 vis-network（与 GF/alook 版一致，挂到页面 window.vis）。
+  // 不再用 @require：Tampermonkey 沙箱下 @require 的库挂在沙箱 globalThis，用户脚本既读不到
+  // 裸 `vis` 也读不到 window.vis，导致所有站点关系图降级为文字。动态注入 <script> 到页面，
+  // vis 挂 window.vis，getVis() 即可命中；被 CSP 阻止时用 GM_xmlhttpRequest 内联注入兜底。
+  function _loadVisNetwork() {
+    var VIS_URL = "https://jianla.xyz/static/vis-network.min.js";
+    if (document.getElementById("jl-vis-loader")) return;
+    var s = document.createElement("script");
+    s.id = "jl-vis-loader";
+    s.src = VIS_URL;
+    s.onload = function () { window.__jl_vis_ready__ = true; };
+    s.onerror = function () {
+      if (typeof GM_xmlhttpRequest === "function") {
+        GM_xmlhttpRequest({
+          url: VIS_URL,
+          method: "GET",
+          onload: function (resp) {
+            if (resp.responseText && resp.responseText.length > 1000) {
+              var inline = document.createElement("script");
+              inline.id = "jl-vis-loader-inline";
+              inline.textContent = resp.responseText;
+              document.head.appendChild(inline);
+              window.__jl_vis_ready__ = true;
+            }
+          },
+          onerror: function () {}
+        });
+      }
+    };
+    document.head.appendChild(s);
+  }
+  if (!window.vis && !document.getElementById("jl-vis-loader")) {
+    _loadVisNetwork();
+  }
+
+  // 关系图库（vis-network）统一获取：优先页面 window.vis（动态注入），沙箱全局 vis 兜底。
   function getVis() {
-    if (typeof vis !== "undefined" && vis && vis.Network) return vis;
     if (typeof window !== "undefined" && window.vis && window.vis.Network) return window.vis;
+    if (typeof vis !== "undefined" && vis && vis.Network) return vis;
     return null;
   }
 
@@ -3614,7 +3647,7 @@
       "#jl-batch-picker-mask .jlbp-item:hover{background:#FFF3E0}" +
       "#jl-batch-picker-mask .jlbp-check{-webkit-appearance:none!important;appearance:none!important;display:block!important;width:18px!important;height:18px!important;margin:0!important;padding:0!important;flex:0 0 auto!important;box-sizing:border-box!important;border:1.5px solid #B08968!important;border-radius:5px!important;background-color:#fff!important;background-size:14px 14px!important;background-position:center!important;background-repeat:no-repeat!important;opacity:1!important;visibility:visible!important;cursor:pointer!important}" +
       "#jl-batch-picker-mask .jlbp-check:hover{border-color:#E65100!important}" +
-      "#jl-batch-picker-mask .jlbp-check:checked{background-color:#E65100!important;border-color:#E65100!important;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E\")!important}" +
+      "#jl-batch-picker-mask .jlbp-check.on{background-color:#E65100!important;border-color:#E65100!important;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E\")!important}" +
       "#jl-batch-picker-mask .jlbp-idx{flex:0 0 auto;min-width:52px;padding:2px 8px;border-radius:10px;background:#EFEBE4;color:#8D6E63;font-size:11px;text-align:center}" +
       "#jl-batch-picker-mask .jlbp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#3E2723;font-size:13px}" +
       "#jl-batch-picker-mask .jlbp-footer{display:flex;gap:10px;padding:12px 16px;border-top:1px solid #E8DDD2;background:#F5EDE0}" +
@@ -3687,7 +3720,7 @@
         var label = document.createElement("label");
         label.className = "jlbp-item";
         label.innerHTML =
-          '<input type="checkbox" class="jlbp-check" data-url="' + escHtml(c.source_url) + '" ' + checked + '>' +
+          '<span class="jlbp-check' + (checked ? ' on' : '') + '" data-url="' + escHtml(c.source_url) + '" role="checkbox" aria-checked="' + (checked ? 'true' : 'false') + '"></span>' +
           '<span class="jlbp-idx">' + escHtml(idxLabel) + '</span>' +
           '<span class="jlbp-name">' + escHtml(c.chapter_title) + '</span>';
         listEl.appendChild(label);
@@ -3705,11 +3738,16 @@
 
     renderList();
 
-    listEl.addEventListener("change", function (e) {
+    listEl.addEventListener("click", function (e) {
       var box = e.target;
-      if (!box || !box.classList || !box.classList.contains("jlbp-check")) return;
-      var url = box.getAttribute("data-url");
-      if (box.checked) checkedSet[url] = true; else delete checkedSet[url];
+      var item = box && box.closest ? box.closest(".jlbp-item") : null;
+      if (!item) return;
+      var cb = item.querySelector(".jlbp-check");
+      if (!cb) return;
+      var url = cb.getAttribute("data-url");
+      var on = cb.classList.toggle("on");
+      cb.setAttribute("aria-checked", on ? "true" : "false");
+      if (on) checkedSet[url] = true; else delete checkedSet[url];
       refreshCount();
     });
 

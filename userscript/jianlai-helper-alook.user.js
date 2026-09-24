@@ -3568,7 +3568,7 @@
       "#jl-batch-picker-mask .jlbp-item:hover{background:#FFF3E0}" +
       "#jl-batch-picker-mask .jlbp-check{-webkit-appearance:none!important;appearance:none!important;display:block!important;width:18px!important;height:18px!important;margin:0!important;padding:0!important;flex:0 0 auto!important;box-sizing:border-box!important;border:1.5px solid #B08968!important;border-radius:5px!important;background-color:#fff!important;background-size:14px 14px!important;background-position:center!important;background-repeat:no-repeat!important;opacity:1!important;visibility:visible!important;cursor:pointer!important}" +
       "#jl-batch-picker-mask .jlbp-check:hover{border-color:#E65100!important}" +
-      "#jl-batch-picker-mask .jlbp-check:checked{background-color:#E65100!important;border-color:#E65100!important;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E\")!important}" +
+      "#jl-batch-picker-mask .jlbp-check.on{background-color:#E65100!important;border-color:#E65100!important;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E\")!important}" +
       "#jl-batch-picker-mask .jlbp-idx{flex:0 0 auto;min-width:52px;padding:2px 8px;border-radius:10px;background:#EFEBE4;color:#8D6E63;font-size:11px;text-align:center}" +
       "#jl-batch-picker-mask .jlbp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#3E2723;font-size:13px}" +
       "#jl-batch-picker-mask .jlbp-footer{display:flex;gap:10px;padding:12px 16px;border-top:1px solid #E8DDD2;background:#F5EDE0}" +
@@ -3641,7 +3641,7 @@
         var label = document.createElement("label");
         label.className = "jlbp-item";
         label.innerHTML =
-          '<input type="checkbox" class="jlbp-check" data-url="' + escHtml(c.source_url) + '" ' + checked + '>' +
+          '<span class="jlbp-check' + (checked ? ' on' : '') + '" data-url="' + escHtml(c.source_url) + '" role="checkbox" aria-checked="' + (checked ? 'true' : 'false') + '"></span>' +
           '<span class="jlbp-idx">' + escHtml(idxLabel) + '</span>' +
           '<span class="jlbp-name">' + escHtml(c.chapter_title) + '</span>';
         listEl.appendChild(label);
@@ -3659,11 +3659,16 @@
 
     renderList();
 
-    listEl.addEventListener("change", function (e) {
+    listEl.addEventListener("click", function (e) {
       var box = e.target;
-      if (!box || !box.classList || !box.classList.contains("jlbp-check")) return;
-      var url = box.getAttribute("data-url");
-      if (box.checked) checkedSet[url] = true; else delete checkedSet[url];
+      var item = box && box.closest ? box.closest(".jlbp-item") : null;
+      if (!item) return;
+      var cb = item.querySelector(".jlbp-check");
+      if (!cb) return;
+      var url = cb.getAttribute("data-url");
+      var on = cb.classList.toggle("on");
+      cb.setAttribute("aria-checked", on ? "true" : "false");
+      if (on) checkedSet[url] = true; else delete checkedSet[url];
       refreshCount();
     });
 
