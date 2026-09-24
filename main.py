@@ -621,8 +621,9 @@ class _AnalysisRejected(Exception):
 def _book_url_prefix(source_url):
     """从章节/目录 URL 提取「书级前缀」，用于同站点内区分不同书，防止跨书数据混用。
 
-    - 起点：/chapter/{book}/{chap}/ 或 /book/{book}/ → 保留到 book 一层
-    - 番茄：/read/{book}/ 或 /book/{book}/ → 保留到 book 一层
+    - 起点/纵横：/chapter/{book}/{...} → 保留到 book 一层
+    - 番茄：/reader/{book}、/page/{book}、/read/{book}、/book/{book} → 保留到 book 一层
+    - 七猫：/reader/index/{book} → 保留到 book；/shuku/{book}-{chapter}/ → /shuku/{book}/
     - 笔趣阁镜像（biquge/biquga 等）：首段即书目录（如 /9_9181/123456.html → /9_9181/）
     - 兜底：域名 + 首段（不再退化为纯域名，避免同站所有书合并成一本书）
     """
@@ -636,29 +637,88 @@ def _book_url_prefix(source_url):
     p0 = segs[0].lower()
     if p0 == "chapter" and len(segs) >= 2:
         return f"{origin}/chapter/{segs[1]}/"
-    if p0 in ("book", "read") and len(segs) >= 2:
+    # 七猫 reader/index/{book}（book 在 index 之后）优先于通用 reader 判断
+    if p0 == "reader" and len(segs) >= 3 and segs[1].lower() == "index":
+        return f"{origin}/reader/index/{segs[2]}/"
+    # 番茄 /reader/{book}、/page/{book}；起点/番茄 /book/{book}；/read/{book}
+    if p0 in ("book", "read", "reader", "page") and len(segs) >= 2:
         return f"{origin}/{p0}/{segs[1]}/"
+    # 七猫章节 /shuku/{book}-{chapter}/ → /shuku/{book}/
+    if p0 == "shuku" and len(segs) >= 2:
+        book = segs[1].split("-")[0]
+        return f"{origin}/shuku/{book}/"
     return f"{origin}/{segs[0]}/"
+
+
+def _is_chapter_like_title(t):
+    """书名是否「像章节标题」（如 第3节 打到猎物）——用于判断旧兜底是否需用真实书名回填覆盖。"""
+    return bool(t) and re.search(r"第\s*[0-9一二三四五六七八九十百千万零]+\s*[章节卷回]", t) is not None
+
+
+# 页面标题/选择器里常见的「站点脏后缀」，书名末尾带了这些会污染书名、造成拆书
+_DIRTY_TITLE_SUFFIXES = [
+    "小说在线阅读", "完整版在线免费阅读", "在线免费阅读", "免费在线阅读",
+    "在线阅读", "免费阅读", "全文阅读", "无弹窗", "最新章节目录", "章节目录",
+    "章节列表", "最新章节", "完整版", "手机版",
+]
+
+
+def _clean_book_title(title):
+    """去除书名末尾的站点脏后缀（如「…小说在线阅读」），避免同一本书因脏书名被拆成多本。"""
+    t = (title or "").strip()
+    if not t:
+        return t
+    prev = None
+    while prev != t:
+        prev = t
+        for suf in _DIRTY_TITLE_SUFFIXES:
+            if t.endswith(suf) and len(t) > len(suf) + 1:
+                t = t[: -len(suf)].strip()
+                break
+    return t
 
 
 def _resolve_book_id(user, book_title, author, source_url, chapter_title):
     book_id = None
+    # 书级前缀（跨页面最稳定）作为 book 的归属键；新建时优先用它而非原始章节 URL，
+    # 避免同一本书因「书名匹配」分支存了章节级 URL 而被拆成多本。
+    url_prefix = _book_url_prefix(source_url) if source_url else ""
+    title = _clean_book_title(book_title)
     with get_db() as conn:
-        if book_title and book_title.strip():
+        if title:
             book = conn.execute(
-                "SELECT id FROM books WHERE username=? AND title=?",
-                (user, book_title.strip()),
+                "SELECT id, source_url_pattern FROM books WHERE username=? AND title=?",
+                (user, title),
             ).fetchone()
             if book:
                 book_id = book["id"]
+                # 旧数据碎片：书名命中的 book 存的是「章节级 URL」（比书级前缀更深，如起点
+                # /chapter/{book}/{cid}/、纵横 /chapter/{book}/{cid}.html），而同用户已存在
+                # 书级前缀的正式 book → 归并到正式 book（否则同一本书被拆成多本，历史/概况混乱）。
+                if (
+                    url_prefix
+                    and book["source_url_pattern"]
+                    and book["source_url_pattern"] != url_prefix
+                    and book["source_url_pattern"].startswith(url_prefix)
+                ):
+                    formal = conn.execute(
+                        "SELECT id, title FROM books WHERE username=? AND source_url_pattern=?",
+                        (user, url_prefix),
+                    ).fetchone()
+                    if formal:
+                        book_id = formal["id"]
+                        if _is_chapter_like_title(formal["title"]) or formal["title"] != title:
+                            conn.execute(
+                                "UPDATE books SET title=? WHERE id=?",
+                                (title, book_id),
+                            )
             else:
                 cur = conn.execute(
                     "INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (user, book_title.strip(), author or "", source_url or "", int(time.time())),
+                    (user, title, author or "", url_prefix, int(time.time())),
                 )
                 book_id = cur.lastrowid
         if not book_id and source_url:
-            url_prefix = _book_url_prefix(source_url)
             book = conn.execute(
                 "SELECT id FROM books WHERE username=? AND source_url_pattern=?",
                 (user, url_prefix),

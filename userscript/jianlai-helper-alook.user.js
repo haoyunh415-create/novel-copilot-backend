@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.33
+// @version      2.3.37
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -32,7 +32,7 @@
   if (window.__jianlai_userscript_loaded__) return;
   window.__jianlai_userscript_loaded__ = true;
   // CSP 兜底：部分网站阻止外部脚本加载，此时用 fetch 拉取后内联注入
-  if (!window.vis && !document.getElementById("jl-vis-loader")) {
+  if (!getVis() && !document.getElementById("jl-vis-loader")) {
     var s = document.createElement("script");
     s.id = "jl-vis-loader";
     s.src = "https://jianla.xyz/static/vis-network.min.js";
@@ -57,8 +57,16 @@
   
   // 关系图库（vis-network）统一获取：兼容沙箱全局 vis 与页面 window.vis，避免误判未加载而降级为文字列表。
   function getVis() {
-    if (typeof vis !== "undefined" && vis && vis.Network) return vis;
-    if (typeof window !== "undefined" && window.vis && window.vis.Network) return window.vis;
+    try {
+      var uw = (typeof unsafeWindow !== "undefined" && unsafeWindow) ? unsafeWindow : null;
+      if (uw && uw.vis && uw.vis.Network) return uw.vis;
+    } catch (_) {}
+    try {
+      if (typeof window !== "undefined" && window.vis && window.vis.Network) return window.vis;
+    } catch (_) {}
+    try {
+      if (typeof vis !== "undefined" && vis && vis.Network) return vis;
+    } catch (_) {}
     return null;
   }
 
@@ -477,7 +485,30 @@
   }
 
 
-  function getBookTitle() {
+  // 去掉书名末尾的站点脏后缀（「…小说在线阅读」「…完整版在线免费阅读」等），
+  // 否则目录页/阅读页会把脏书名发给后端，导致同一本书被拆成多本、历史/概况混乱。
+  function cleanBookTitle(t) {
+    if (!t) return t;
+    var suffixes = [
+      "完整版在线免费阅读", "小说在线阅读", "在线免费阅读", "免费在线阅读",
+      "在线阅读", "免费阅读", "全文阅读", "无弹窗", "最新章节目录", "章节目录",
+      "章节列表", "最新章节", "完整版", "手机版",
+    ];
+    var prev = null;
+    while (prev !== t) {
+      prev = t;
+      for (var i = 0; i < suffixes.length; i++) {
+        var s = suffixes[i];
+        if (t.length > s.length + 1 && t.slice(-s.length) === s) {
+          t = t.slice(0, -s.length).trim();
+          break;
+        }
+      }
+    }
+    return t;
+  }
+
+  function getBookTitleRaw() {
     // QQ阅读：书名在 og:novel:book_name meta（详情页/阅读页均有）
     if (isQQBookSite()) {
       var qbMeta = document.querySelector("meta[property='og:novel:book_name']");
@@ -485,6 +516,22 @@
       if (qbt) return qbt;
       var qbd = getQQNuxtData();
       if (qbd && (qbd.bookName || qbd.novelName)) return String(qbd.bookName || qbd.novelName).trim();
+    }
+    // 纵横（zongheng）：书名只在 <title>——详情/目录页 "{书名}({作者})最新章节全本在线阅读-纵横中文网官方正版"，
+    // 阅读页 "{章节}_{书名}_纵横中文网"。无 og:* meta，选择器也匹配不到，需专门解析 <title>。
+    if (/zongheng\.com/i.test(location.hostname)) {
+      const zt = (document.title || "").trim();
+      const zm = zt.match(/^(.*?)\s*\([^)]*\)\s*最新章节/);
+      if (zm && zm[1] && zm[1].trim()) { const zb = zm[1].trim(); if (zb.length < 100) return zb; }
+      const zsegs = zt.split(/[_\-]/).map(function (s) { return s.trim(); }).filter(Boolean);
+      for (let i = zsegs.length - 1; i >= 0; i--) {
+        const s = zsegs[i];
+        if (!s || s.length >= 100) continue;
+        if (/纵横|中文网|最新章节|在线阅读|官方正版|免费|章节|目录|书页/i.test(s)) continue;
+        if (/^第\s*[0-9一二三四五六七八九十百千万零]+\s*[章节卷回]/.test(s)) continue;
+        return s;
+      }
+      if (zt && zt.length < 100) return zt;
     }
     const selectors = [
       ".muye-reader-nav-title",
@@ -524,6 +571,11 @@
     const m = location.pathname.match(/\/book\/([^/]+)/);
     if (m) return decodeURIComponent(m[1]);
     return "";
+  }
+
+  // 对外统一入口：原始书名 + 脏后缀清洗，保证发给后端的书名是干净的
+  function getBookTitle() {
+    return cleanBookTitle(getBookTitleRaw());
   }
 
   function getAuthor() {
@@ -1055,7 +1107,7 @@
       return meaning ? term + "：" + meaning : term;
     }));
 
-    drawGraph(result.graph);
+    try { drawGraph(result.graph); } catch (_) {}
 
     // 添加反馈按钮
     showFeedbackButtons(result);
@@ -1334,36 +1386,42 @@
   }
 
   function drawGraph(graph) {
-    const graphBox = document.getElementById("jl-graph");
+    var graphBox = document.getElementById("jl-graph");
     if (!graphBox) return;
-    if (!getVis()) {
-      graphBox.innerHTML = '<div class="jl-ov-empty">图表库加载中，请稍后再试</div>';
-      return;
-    }
     if (!Array.isArray(graph && graph.nodes) || (graph && graph.nodes && graph.nodes.length === 0)) {
       graphBox.innerHTML = '<div class="jl-ov-empty">本章暂无人物关系数据</div>';
       return;
     }
+    var vis = getVis();
+    if (!vis) { renderGraphAsText(graphBox, graph); return; }
 
-    const nodes = graph.nodes.map((node) => ({
-      ...node,
-      label: String(node.label || node.name || node.id),
-      color: {
-        background: node.level === "core" ? "#fff176" : "#d7ccc8",
-        border: "#8d6e63"
-      },
-      font: { size: node.level === "core" ? 18 : 14 },
-      shape: "dot",
-      size: node.level === "core" ? 24 : 16
-    }));
-
-    const edges = Array.isArray(graph.edges) ? graph.edges : [];
-    if (network) { network.destroy(); network = null; }
-    network = new getVis().Network(graphBox, { nodes, edges }, {
-      edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
-      physics: { stabilization: true },
-      interaction: { hover: true }
+    var nodes = graph.nodes.map(function (node) {
+      return {
+        id: node.id,
+        label: String(node.label || node.name || node.id),
+        color: {
+          background: node.level === "core" ? "#fff176" : "#d7ccc8",
+          border: "#8d6e63"
+        },
+        font: { size: node.level === "core" ? 18 : 14 },
+        shape: "dot",
+        size: node.level === "core" ? 24 : 16
+      };
     });
+    var edges = Array.isArray(graph.edges) ? graph.edges : [];
+    try {
+      graphBox.innerHTML = "";
+      graphBox.style.height = "580px";
+      if (network) { network.destroy(); network = null; }
+      network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
+        edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
+        physics: { stabilization: true },
+        interaction: { hover: true }
+      });
+    } catch (e) {
+      try { if (network) { network.destroy(); network = null; } } catch (_) {}
+      renderGraphAsText(graphBox, graph);
+    }
   }
 
   function renderChapterGraph() {
@@ -1406,7 +1464,8 @@
     });
     var edges = Array.isArray(graph.edges) ? graph.edges : [];
     if (network) { network.destroy(); network = null; }
-    network = new getVis().Network(graphBox, { nodes: nodes, edges: edges }, {
+    var vis = getVis();
+    network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
       edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
       physics: { stabilization: true, barnesHut: { gravitationalConstant: -2000, springLength: 200 } },
       interaction: { hover: true, tooltipDelay: 200 }
@@ -2409,7 +2468,8 @@
       graphBox.innerHTML = "";
       graphBox.style.height = "560px";
       if (network) { network.destroy(); network = null; }
-    network = new getVis().Network(graphBox, { nodes: nodes, edges: edges }, {
+      var vis = getVis();
+      network = new vis.Network(graphBox, { nodes: nodes, edges: edges }, {
         edges: { arrows: "to", color: "#9b8a80", font: { align: "middle" } },
         physics: { stabilization: true, barnesHut: { gravitationalConstant: -2000, springLength: 200 } },
         interaction: { hover: true, tooltipDelay: 200 }
@@ -3391,22 +3451,40 @@
       return arr.slice(arr.length - count);
     }
 
+    // QQ阅读正文在 window.__NUXT__ 的 currentContent 里（Nuxt SSR）。抽取一次，供正文提取与锁章判定共用。
+    function getQQContent(html) {
+      if (!html) return null;
+      var nuxtM = html.match(/window\.__NUXT__\s*=\s*([\s\S]*?);?\s*<\/script>/i);
+      if (!nuxtM) return null;
+      try {
+        var val = (new Function("return (" + nuxtM[1] + ")"))();
+        if (typeof val === "function") val = val();
+        var d = val && val.data;
+        var block = Array.isArray(d) ? d[0] : d;
+        return (block && block.currentContent) || null;
+      } catch (_) { return null; }
+    }
+
+    // QQ阅读锁定章节判定（currentContent 对象）：加密/字体混淆正文、未解锁(authStatus=0)、或正文仅预览片段(长度远小于总字数)
+    function isQqbookCcLocked(cc) {
+      if (!cc) return false;
+      if (cc.encrypt || cc.fontEncrypt) return true;
+      if (cc.authStatus === 0) return true;
+      var content = cc.content || "";
+      return !!(cc.totalWords > 200 && content.length < cc.totalWords * 0.5);
+    }
+
+    function isQQBookLocked(html) {
+      return isQqbookCcLocked(getQQContent(html));
+    }
+
     function extractChapterText(html, site) {
       if (site === "qqbook") {
-        // QQ阅读正文在 window.__NUXT__ 里（Nuxt SSR），VIP 加密章节返回空
-        var nuxtM = (html || "").match(/window\.__NUXT__\s*=\s*([\s\S]*?);?\s*<\/script>/i);
-        if (!nuxtM) return "";
-        try {
-          var val = (new Function("return (" + nuxtM[1] + ")"))();
-          if (typeof val === "function") val = val();
-          var d = val && val.data;
-          var block = Array.isArray(d) ? d[0] : d;
-          var cc = block && block.currentContent;
-          if (!cc || cc.encrypt || cc.fontEncrypt) return "";
-          var qdoc = parseHtml(cc.content || "");
-          var qtext = (qdoc.body && (qdoc.body.innerText || qdoc.body.textContent)) || "";
-          return qtext.split("\n").map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 3; }).join("\n");
-        } catch (_) { return ""; }
+        var cc = getQQContent(html);
+        if (!cc || isQqbookCcLocked(cc)) return "";
+        var qdoc = parseHtml(cc.content || "");
+        var qtext = (qdoc.body && (qdoc.body.innerText || qdoc.body.textContent)) || "";
+        return qtext.split("\n").map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 3; }).join("\n");
       }
       var doc = parseHtml(html);
       var selectors = [
@@ -3510,6 +3588,8 @@
       isChapterTitle: isChapterTitle,
       looksLikeChapterHref: looksLikeChapterHref,
       isPaywall: isPaywall,
+      isQQBookLocked: isQQBookLocked,
+      getQQContent: getQQContent,
       biqugeCatalogEntryHref: biqugeCatalogEntryHref,
       biqugeCatalogPageCount: biqugeCatalogPageCount,
       readTzContext: readTzContext,
@@ -3781,9 +3861,14 @@
   async function collectQimaoCatalog() {
     var loading = showCatalogLoading();
     try {
-      var m = location.pathname.match(/\/shuku\/(\d+)(?:-\d+)?\//);
-      if (!m) return null;
-      var bookId = m[1];
+      var m = location.pathname.match(/\/shuku\/(\d+)/);
+      var bookId = m ? m[1] : null;
+      // 兜底：不在 /shuku/ 路径（如首页/搜索）时，从页面内嵌状态里找 bookId
+      if (!bookId) {
+        var mm = (document.documentElement.outerHTML || "").match(/(?:bookId|book_id|novelId|novel_id|"book_id")\s*[:=]\s*["']?(\d{4,})/i);
+        if (mm) bookId = mm[1];
+      }
+      if (!bookId) return null;
       var resp = await fetchWithRetry(
         "https://www.qimao.com/qimaoapi/api/book/chapter-list?book_id=" + bookId,
         { credentials: "include" }, 2, 15000
@@ -4178,6 +4263,7 @@
     if (/qidian\.com/i.test(h)) return "qidian";
     if (/zongheng\.com/i.test(h)) return "zongheng";
     if (/book\.qq\.com/i.test(h)) return "qqbook";
+    if (/qimao\.com/i.test(h)) return "qimao";
     return "biquge";
   }
 
@@ -4202,6 +4288,10 @@
       // 笔趣阁 biquga 正文是 document.writeln(qsbs.bb('BASE64'))，先解码再提正文
       var decoded = window.JLBatchParser.decodeBiqugeBase64(html);
       if (decoded) html = decoded;
+    }
+    // QQ阅读 VIP 未解锁章节：SSR 只回预览片段（<300 字），应判「付费跳过」而非「抓取失败」
+    if (site === "qqbook" && window.JLBatchParser.isQQBookLocked(html)) {
+      return { text: "", paywall: true };
     }
     var text = window.JLBatchParser.extractChapterText(html, site);
     if (site === "fanqie") text = decodeFanqieText(text);
@@ -4485,6 +4575,34 @@
       '<p style="font-size:12px;color:#5D4037;margin:10px 0 0">' + escHtml(text || (done + " / " + total + " 章")) + '</p>';
   }
 
+  // 本次批量没有新分析（章节都「已分析过/已完成」）时，回退用本书已存储的分析填充概况，
+  // 避免「全书批量分析完成：共 0 章」的空概况误导用户。
+  async function mergeStoredAnalysesForBatch() {
+    if (!_currentBookId) return false;
+    var API = await getAPI();
+    var token = await getToken();
+    if (!token) return false;
+    try {
+      var resp = await fetch(API + "/api/books/" + _currentBookId + "/analyses", {
+        headers: { Authorization: "Bearer " + token }
+      });
+      var payload = await resp.json();
+      if (!payload.success || !payload.data) return false;
+      var analyses = payload.data.analyses || [];
+      if (!analyses.length) return false;
+      analyses.forEach(function (a) {
+        if (!a.result_json) return;
+        var result;
+        try { result = typeof a.result_json === "string" ? JSON.parse(a.result_json) : a.result_json; } catch (_) { return; }
+        if (!result) return;
+        mergeBatchAnalysis(a.chapter_title, result, a.chapter_index, a.chapter_index);
+      });
+      return _batchMerged.summaries.length > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function runBatchJob(jobData) {
     var jobId = jobData.job_id || jobData.id;
     var total = jobData.total || 0;
@@ -4632,11 +4750,19 @@
     var mergedResult = mergedToResult();
     _batchGraph = mergedResult.graph;
     _graphMode = "batch";  // 关系图标签默认展示本次批量合并图，避免被「当前章节」覆盖
-    renderResult(mergedResult);
-    renderBatchChapterList();
-    renderBatchSkipNote(analyzedCount, skippedAlready, skippedPaywall, skippedFetch, skippedError, failedChapters);
+    // 本次批量没有新分析（章节都「已分析过/已完成」）→ 用已存储的分析补全概况，避免「共 0 章」空概况
+    if (_batchMerged.summaries.length === 0) {
+      await mergeStoredAnalysesForBatch();
+      if (_batchMerged.summaries.length > 0) {
+        mergedResult = mergedToResult();
+        _batchGraph = mergedResult.graph;
+      }
+    }
+    try { renderResult(mergedResult); } catch (_) {}
+    try { renderBatchChapterList(); } catch (_) {}
+    try { renderBatchSkipNote(analyzedCount, skippedAlready, skippedPaywall, skippedFetch, skippedError, failedChapters); } catch (_) {}
     // 建立书籍上下文后刷新「历史分析」列表，批量分析过的章节即可在下拉/历史里看到
-    loadAnalysisHistory();
+    try { loadAnalysisHistory(); } catch (_) {}
   }
 
 

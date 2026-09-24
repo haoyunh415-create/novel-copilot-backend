@@ -193,22 +193,40 @@
     return arr.slice(arr.length - count);
   }
 
+  // QQ阅读正文在 window.__NUXT__ 的 currentContent 里（Nuxt SSR）。抽取一次，供正文提取与锁章判定共用。
+  function getQQContent(html) {
+    if (!html) return null;
+    var nuxtM = html.match(/window\.__NUXT__\s*=\s*([\s\S]*?);?\s*<\/script>/i);
+    if (!nuxtM) return null;
+    try {
+      var val = (new Function("return (" + nuxtM[1] + ")"))();
+      if (typeof val === "function") val = val();
+      var d = val && val.data;
+      var block = Array.isArray(d) ? d[0] : d;
+      return (block && block.currentContent) || null;
+    } catch (_) { return null; }
+  }
+
+  // QQ阅读锁定章节判定（currentContent 对象）：加密/字体混淆正文、未解锁(authStatus=0)、或正文仅预览片段(长度远小于总字数)
+  function isQqbookCcLocked(cc) {
+    if (!cc) return false;
+    if (cc.encrypt || cc.fontEncrypt) return true;
+    if (cc.authStatus === 0) return true;
+    var content = cc.content || "";
+    return !!(cc.totalWords > 200 && content.length < cc.totalWords * 0.5);
+  }
+
+  function isQQBookLocked(html) {
+    return isQqbookCcLocked(getQQContent(html));
+  }
+
   function extractChapterText(html, site) {
     if (site === "qqbook") {
-      // QQ阅读正文在 window.__NUXT__ 里（Nuxt SSR），VIP 加密章节返回空
-      var nuxtM = (html || "").match(/window\.__NUXT__\s*=\s*([\s\S]*?);?\s*<\/script>/i);
-      if (!nuxtM) return "";
-      try {
-        var val = (new Function("return (" + nuxtM[1] + ")"))();
-        if (typeof val === "function") val = val();
-        var d = val && val.data;
-        var block = Array.isArray(d) ? d[0] : d;
-        var cc = block && block.currentContent;
-        if (!cc || cc.encrypt || cc.fontEncrypt) return "";
-        var qdoc = parseHtml(cc.content || "");
-        var qtext = (qdoc.body && (qdoc.body.innerText || qdoc.body.textContent)) || "";
-        return qtext.split("\n").map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 3; }).join("\n");
-      } catch (_) { return ""; }
+      var cc = getQQContent(html);
+      if (!cc || isQqbookCcLocked(cc)) return "";
+      var qdoc = parseHtml(cc.content || "");
+      var qtext = (qdoc.body && (qdoc.body.innerText || qdoc.body.textContent)) || "";
+      return qtext.split("\n").map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 3; }).join("\n");
     }
     var doc = parseHtml(html);
     var selectors = [
@@ -315,6 +333,9 @@
     chapterId: chapterId,
     catalogSortKey: catalogSortKey,
     isPaywall: isPaywall,
+    isQQBookLocked: isQQBookLocked,
+    isQqbookCcLocked: isQqbookCcLocked,
+    getQQContent: getQQContent,
     biqugeCatalogEntryHref: biqugeCatalogEntryHref,
     biqugeCatalogPageCount: biqugeCatalogPageCount,
     readTzContext: readTzContext,
