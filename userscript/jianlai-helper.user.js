@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         鉴来助手 - 小说 AI 伏笔雷达
 // @namespace    https://jianla.xyz
-// @version      2.3.37
+// @version      2.3.38
 // @description  为长篇小说提供无剧透前情提要、伏笔提示和人物关系图。支持 25+ 主流小说阅读平台，桌面油猴与手机浏览器（Alook/Via/X浏览器）均可使用。
 // @author       鉴来助手
 // @homepageURL  https://jianla.xyz
@@ -346,24 +346,32 @@
       ".read-content", ".main-text-wrap", ".chapter-content",
       ".content", ".article-content", ".post-content",
       ".txt", ".text", ".novel-content", ".book-content",
+      ".chapter-wrapper", ".print",
       "article", ".entry-content", "#article", "#text",
       // 手机版 SPA（起点/番茄/晋江/笔趣阁等移动端）
       ".chapter-text", ".reader-content", ".chapter-detail",
       ".read-section", ".chapter-body", ".reader-main",
+      ".muye-reader-content", ".muye-reader-text", ".muye-reader-body",
+      ".muye-reader-main", ".j_readContent", ".text-content",
       ".page-content", ".main-content", "[class*='reader']",
       "[class*='chapter-text']", "[class*='article-text']",
       ".book-content-wrap", ".novel-text", ".read-box",
     ];
+    // 只取 <p>、按「中文字符数」最大化选容器：番茄正文在 .muye-reader-content（纯正文 <p>），
+    // 若按总长度会误选最外层 .muye-reader（含大量 UI 文本的 div/span），导致正文断续/混入界面文字。
+    var _cn = (t) => (t.match(/[一-鿿㐀-䶿]/g) || []).length;
+    var _collectPs = (el) => Array.from(el.querySelectorAll("p"))
+      .map((p) => (p.innerText ? p.innerText.trim() : ""))
+      .filter((t) => t.length > 5)
+      .join("\n");
     let bestText = "";
+    let bestCn = 0;
     for (const sel of containerSelectors) {
       const container = document.querySelector(sel);
       if (!container) continue;
-      const paragraphs = container.querySelectorAll("p, div");
-      const text = Array.from(paragraphs)
-        .map((p) => (p.innerText ? p.innerText.trim() : ""))
-        .filter((t) => t.length > 5)
-        .join("\n");
-      if (text.length > bestText.length) bestText = text;
+      const text = _collectPs(container);
+      const cn = _cn(text);
+      if (cn > bestCn) { bestCn = cn; bestText = text; }
     }
     if (bestText.length < 80) {
       const allP = document.querySelectorAll("p");
@@ -3360,7 +3368,9 @@
       if (/^\/(?:book|info|novel|list|search|author|tag|sort|top|full|quanben|wanben|new|rank|bang|tuijian|fenlei)\/\d+\.html?\/?$/i.test(href)) return false;
       // 纵横/起点打赏榜（粉丝榜）用户名链接 /show/userInfo/{id}.html：不是章节，却以「/数字.html」结尾被误判
       if (/\/userInfo\/\d+\.html?\/?$/i.test(href)) return false;
+      // 起点新版章节链接是随机串（如 /chapter/SaT8js…/oQbX6Y…），不是数字，需单独匹配
       return /\/chapter\/\d+\/\d+/i.test(href)
+        || /\/chapter\/[A-Za-z0-9_-]{10,}\/[A-Za-z0-9_-]{10,}/i.test(href)
         || /\/(\d{3,})\.html?\/?$/i.test(href)
         || /[?&](?:id|chapterId|item_id)=(\d{4,})/i.test(href);
     }
@@ -3893,7 +3903,7 @@
     }
     // 起点/纵横的「详情页」只展示部分章节（试读/最新章节），并非完整目录；
     // 先跳转到真正的目录页再解析，避免目录不全、排序错乱。
-    var onCatalogPage = (site === "qidian" && /\/book\/\d+\/catalog\/?$/i.test(location.pathname)) ||
+    var onCatalogPage = (site === "qidian" && (/\/book\/\d+\/catalog\/?$/i.test(location.pathname) || /\/info\/\d+/i.test(location.pathname))) ||
                         (site === "zongheng" && /tabsName=catalogue/i.test(location.search));
     if ((site === "qidian" || site === "zongheng") && !onCatalogPage) {
       var catUrl = guessCatalogUrl();
@@ -4236,7 +4246,8 @@
     if (/qidian\.com/i.test(h)) {
       m = path.match(/\/chapter\/(\d+)/) || path.match(/\/book\/(\d+)/);
       if (m) return "https://www.qidian.com/book/" + m[1] + "/catalog/";
-      return null;
+      // 新版起点：详情页 /info/{id}、章节页 /chapter/{随机串} 拿不到数字书 ID，
+      // 不 return null，落到下方通用 fallback（按页面「目录」链接跳转）。
     }
     // 纵横：详情页 /detail/{id} 默认只展示最新章节，完整目录在 ?tabsName=catalogue
     if (/zongheng\.com/i.test(h)) {
@@ -4375,6 +4386,11 @@
     }
     var text = window.JLBatchParser.extractChapterText(html, site);
     if (site === "fanqie") text = decodeFanqieText(text);
+    // 付费/会员章节（纵横 VIP 等）：未登录/未购买时只回预览片段（<300 字），
+    // 先按付费墙判定直接跳过，别走 iframe——跨域 iframe 读不到 contentDocument，反而误判成「抓取失败」。
+    if ((!text || text.length < 300) && window.JLBatchParser.isPaywall(html)) {
+      return { text: "", paywall: true };
+    }
     // JS 动态渲染站点（七猫/番茄等）：raw HTML 拿不到正文（<300 字），同域改走 iframe 让浏览器渲染后再提
     if (!text || text.length < 300) {
       return fetchChapterViaIframe(source_url, site);

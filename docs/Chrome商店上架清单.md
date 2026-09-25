@@ -103,7 +103,7 @@ Permission justifications:
 
 4. host_permissions https://jianla.xyz:8000/* — The extension's own backend API, used for AI analysis, email-code login, and credit management. This is our single self-hosted endpoint.
 
-5. Content scripts on 26 novel-reading domains — These are the supported reading platforms (e.g., qidian.com, fanqienovel.com). Access is limited to reading the currently-open chapter text and rendering the panel; no cross-site collection.
+5. Content scripts on 28 novel-reading domains — These are the supported reading platforms (e.g., qidian.com, book.qq.com, fanqienovel.com). Access is limited to reading the currently-open chapter text and rendering the panel; no cross-site collection.
 
 Remote code: None. All code is bundled in this package; the extension only calls our own backend and never loads or executes remote code.
 

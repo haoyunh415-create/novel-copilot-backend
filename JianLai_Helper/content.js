@@ -3386,7 +3386,7 @@
     }
     // 起点/纵横的「详情页」只展示部分章节（试读/最新章节），并非完整目录；
     // 先跳转到真正的目录页再解析，避免目录不全、排序错乱。
-    var onCatalogPage = (site === "qidian" && /\/book\/\d+\/catalog\/?$/i.test(location.pathname)) ||
+    var onCatalogPage = (site === "qidian" && (/\/book\/\d+\/catalog\/?$/i.test(location.pathname) || /\/info\/\d+/i.test(location.pathname))) ||
                         (site === "zongheng" && /tabsName=catalogue/i.test(location.search));
     if ((site === "qidian" || site === "zongheng") && !onCatalogPage) {
       var catUrl = guessCatalogUrl();
@@ -3734,7 +3734,8 @@
     if (/qidian\.com/i.test(h)) {
       m = path.match(/\/chapter\/(\d+)/) || path.match(/\/book\/(\d+)/);
       if (m) return "https://www.qidian.com/book/" + m[1] + "/catalog/";
-      return null;
+      // 新版起点：详情页 /info/{id}、章节页 /chapter/{随机串} 拿不到数字书 ID，
+      // 不 return null，落到下方通用 fallback（按页面「目录」链接跳转）。
     }
     // 纵横：详情页 /detail/{id} 默认只展示最新章节，完整目录在 ?tabsName=catalogue
     if (/zongheng\.com/i.test(h)) {
@@ -3893,6 +3894,11 @@
     }
     var text = globalThis.JLBatchParser.extractChapterText(html, site);
     if (site === "fanqie") text = decodeFanqieText(text);
+    // 付费/会员章节（纵横 VIP 等）：未登录/未购买时只回预览片段（<300 字），
+    // 先按付费墙判定直接跳过，别走 iframe——跨域 iframe 读不到 contentDocument，反而误判成「抓取失败」。
+    if ((!text || text.length < 300) && globalThis.JLBatchParser.isPaywall(html)) {
+      return { text: "", paywall: true };
+    }
     // JS 动态渲染站点（七猫/番茄/晋江等）：raw HTML 拿不到正文（<300 字），同域则改走 iframe 让浏览器渲染后再提
     if (!isCrossOrigin(source_url) && (!text || text.length < 300)) {
       return fetchChapterViaIframe(source_url, site);

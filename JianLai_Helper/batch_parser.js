@@ -21,7 +21,9 @@
     if (/^\/(?:book|info|novel|list|search|author|tag|sort|top|full|quanben|wanben|new|rank|bang|tuijian|fenlei)\/\d+\.html?\/?$/i.test(href)) return false;
     // 纵横/起点打赏榜（粉丝榜）用户名链接 /show/userInfo/{id}.html：不是章节，却以「/数字.html」结尾被误判
     if (/\/userInfo\/\d+\.html?\/?$/i.test(href)) return false;
+    // 起点新版章节链接是随机串（如 /chapter/SaT8js…/oQbX6Y…），不是数字，需单独匹配
     return /\/chapter\/\d+\/\d+/i.test(href)
+      || /\/chapter\/[A-Za-z0-9_-]{10,}\/[A-Za-z0-9_-]{10,}/i.test(href)
       || /\/(\d{3,})\.html?\/?$/i.test(href)
       || /[?&](?:id|chapterId|item_id)=(\d{4,})/i.test(href);
   }
