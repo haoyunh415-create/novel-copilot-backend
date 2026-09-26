@@ -443,6 +443,32 @@ def _cache_analysis(conn, text_hash: str, detail_level: str, spoiler_free: int, 
     )
 
 
+def _save_analysis(conn, *, user, book_id, chapter_title, chapter_index, source_url,
+                   text_hash, detail_level, spoiler_int, result):
+    """写入一条分析记录，并做章节级彻底去重。
+
+    批量分析与逐章分析同一章时，抓取的正文可能有细微差异，导致 text_hash 不同、
+    唯一键 (username, text_hash, detail_level, spoiler_free) 无法识别为同一章，
+    从而产生重复记录。这里先删除「同用户 + 同书 + 同章节标题」的旧记录，再插入
+    新记录，保证章节级唯一（同章只保留最新一条）。
+    """
+    if book_id and chapter_title:
+        conn.execute(
+            "DELETE FROM analyses WHERE username=? AND book_id=? AND chapter_title=?",
+            (user, book_id, chapter_title),
+        )
+    conn.execute(
+        "INSERT OR REPLACE INTO analyses (username, book_id, chapter_title, chapter_index, source_url, text_hash, detail_level, spoiler_free, result_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (user, book_id, chapter_title, chapter_index, source_url, text_hash, detail_level, spoiler_int,
+         json.dumps(result, ensure_ascii=False), int(time.time())),
+    )
+    if book_id:
+        conn.execute(
+            "UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?",
+            (book_id, book_id),
+        )
+
+
 init_db()
 
 # 每天最多一次 VACUUM，回收删除的缓存数据空间
@@ -796,15 +822,10 @@ def _analyze_one(user, *, text, chapter_title, source_url, detail_level, spoiler
         raise _AnalysisRejected("本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试")
 
     with get_db() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO analyses (username, book_id, chapter_title, chapter_index, source_url, text_hash, detail_level, spoiler_free, result_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (user, book_id, chapter_title, chapter_index, source_url, content_hash, detail_level, spoiler_int, json.dumps(result, ensure_ascii=False), int(time.time())),
-        )
-        if book_id:
-            conn.execute(
-                "UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?",
-                (book_id, book_id),
-            )
+        _save_analysis(conn, user=user, book_id=book_id, chapter_title=chapter_title,
+                       chapter_index=chapter_index, source_url=source_url,
+                       text_hash=content_hash, detail_level=detail_level,
+                       spoiler_int=spoiler_int, result=result)
 
     try:
         with get_db() as conn:
@@ -1684,20 +1705,10 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
                     # 保存分析结果
                     try:
                         with get_db() as db_conn:
-                            db_conn.execute(
-                                """INSERT OR REPLACE INTO analyses (
-                                    username, book_id, chapter_title, chapter_index, source_url,
-                                    text_hash, detail_level, spoiler_free, result_json, created_at
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                                (user, book_id, req.chapter_title, req.chapter_index,
-                                 req.source_url, content_hash, req.detail_level, spoiler_int,
-                                 json.dumps(result, ensure_ascii=False), int(time.time())),
-                            )
-                            if book_id:
-                                db_conn.execute(
-                                    "UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?",
-                                    (book_id, book_id),
-                                )
+                            _save_analysis(db_conn, user=user, book_id=book_id,
+                                           chapter_title=req.chapter_title, chapter_index=req.chapter_index,
+                                           source_url=req.source_url, text_hash=content_hash,
+                                           detail_level=req.detail_level, spoiler_int=spoiler_int, result=result)
                             _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
                     except Exception:
                         import logging
@@ -1927,8 +1938,10 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
                 try:
                     with get_db() as db_conn:
                         if not ai_error:
-                            db_conn.execute("INSERT OR REPLACE INTO analyses (username, book_id, chapter_title, chapter_index, source_url, text_hash, detail_level, spoiler_free, result_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (user, book_id, req.chapter_title, req.chapter_index, req.source_url, content_hash, req.detail_level, spoiler_int, json.dumps(result, ensure_ascii=False), int(time.time())))
-                            if book_id: db_conn.execute("UPDATE books SET chapter_count = (SELECT COUNT(*) FROM analyses WHERE book_id=?) WHERE id=?", (book_id, book_id))
+                            _save_analysis(db_conn, user=user, book_id=book_id,
+                                           chapter_title=req.chapter_title, chapter_index=req.chapter_index,
+                                           source_url=req.source_url, text_hash=content_hash,
+                                           detail_level=req.detail_level, spoiler_int=spoiler_int, result=result)
                             _cache_analysis(db_conn, content_hash, req.detail_level, spoiler_int, result)
                 except Exception:
                     import logging

@@ -112,6 +112,7 @@
   let _graphMode = "chapter";  // "chapter" | "book" | "batch"
   let _batchGraph = null;  // 批量分析合并后的全书关系图（切换「关系图」标签时优先展示）
   let _historySortMode = (function () { try { return localStorage.getItem("JL_HistSort") || "time"; } catch (_) { return "time"; } })();
+  let _historyDesc = (function () { try { return localStorage.getItem("JL_HistDesc") === "1"; } catch (_) { return false; } })();
   let _lastFailedQuestion = null;
   let _serverAnalysisMap = {};  // 章节→服务端分析数据映射
 
@@ -2136,6 +2137,21 @@
 
   // ═══════════ P3-1: 分析历史（服务端加载，跨设备同步） ═══════════
 
+  // 按章节标题去重：批量分析与逐章分析同一章时正文哈希不同会产生两条记录。
+  // 保留 created_at 最新的一条。
+  function dedupeAnalysesByTitle(list) {
+    var sorted = list.slice().sort(function (a, b) { return (b.created_at || 0) - (a.created_at || 0); });
+    var seen = {};
+    var result = [];
+    sorted.forEach(function (a) {
+      var key = a.chapter_title || ("#idx" + (a.chapter_index != null ? a.chapter_index : ""));
+      if (seen[key]) return;
+      seen[key] = true;
+      result.push(a);
+    });
+    return result;
+  }
+
   async function loadAnalysisHistory() {
     if (!_currentBookId) return;
 
@@ -2157,6 +2173,10 @@
 
       var analyses = payload.data.analyses || [];
       if (analyses.length === 0) return;
+
+      // 去重：批量分析与逐章分析同一章时，正文哈希略有差异会产生两条记录，
+      // 导致历史列表重复章节。按章节标题去重，同一标题只保留最新一条。
+      analyses = dedupeAnalysesByTitle(analyses);
 
       // 构建章节→服务端分析数据的映射（优先于 localStorage）
       _serverAnalysisMap = {};
@@ -2199,7 +2219,7 @@
         return result + temp;
       }
 
-      function sortAnalyses(list, mode) {
+      function sortAnalyses(list, mode, desc) {
         var sorted = list.slice();
         if (mode === "chapter") {
           sorted.sort(function (a, b) {
@@ -2210,8 +2230,11 @@
             if (bi == null) return -1;
             return ai - bi;
           });
+          if (desc) sorted.reverse();
         } else {
+          // 时间模式：默认最新在前；倒序时最旧在前
           sorted.sort(function (a, b) { return b.created_at - a.created_at; });
+          if (desc) sorted.reverse();
         }
         return sorted;
       }
@@ -2224,7 +2247,7 @@
           listDiv.style.cssText = "max-height:200px;overflow-y:auto;margin-top:8px";
           section.appendChild(listDiv);
         }
-        var display = sortAnalyses(analyses, _historySortMode).slice(0, 50);
+        var display = sortAnalyses(analyses, _historySortMode, _historyDesc);
         listDiv.innerHTML = display.map(function (a) {
           var date = a.created_at ? new Date(a.created_at * 1000).toLocaleDateString("zh-CN") : "";
           var hasData = !!_serverAnalysisMap[a.chapter_title || ""];
@@ -2256,6 +2279,7 @@
       function updateSortButtons(section) {
         var timeBtn = section.querySelector("#jl-sort-time");
         var chapBtn = section.querySelector("#jl-sort-chapter");
+        var orderBtn = section.querySelector("#jl-sort-order");
         if (!timeBtn || !chapBtn) return;
         if (_historySortMode === "chapter") {
           chapBtn.style.background = "#5D4037"; chapBtn.style.color = "#fff";
@@ -2263,6 +2287,11 @@
         } else {
           timeBtn.style.background = "#5D4037"; timeBtn.style.color = "#fff";
           chapBtn.style.background = "#E8DDD2"; chapBtn.style.color = "#5D4037";
+        }
+        if (orderBtn) {
+          orderBtn.textContent = _historyDesc ? "🔃 正序" : "🔃 倒序";
+          orderBtn.style.background = _historyDesc ? "#5D4037" : "#E8DDD2";
+          orderBtn.style.color = _historyDesc ? "#fff" : "#5D4037";
         }
       }
 
@@ -2276,6 +2305,7 @@
           '<span style="font-size:11px;font-weight:normal">' +
             '<button id="jl-sort-time" class="jl-sort-btn" style="cursor:pointer;border:1px solid #a1887f;padding:1px 8px;border-radius:10px;margin:0 2px;font-size:10px">⏱ 按时间</button>' +
             '<button id="jl-sort-chapter" class="jl-sort-btn" style="cursor:pointer;border:1px solid #a1887f;padding:1px 8px;border-radius:10px;margin:0 2px;font-size:10px">📖 按章节</button>' +
+            '<button id="jl-sort-order" class="jl-sort-btn" style="cursor:pointer;border:1px solid #a1887f;padding:1px 8px;border-radius:10px;margin:0 2px;font-size:10px">🔃 倒序</button>' +
           '</span>' +
         '</h3>' +
         '<p style="font-size:10px;color:#8b7c72;margin:2px 0 6px">点击章节查看 · 🗑️ 删除（服务端同步）</p>';
@@ -2294,6 +2324,12 @@
       section.querySelector("#jl-sort-chapter").addEventListener("click", function () {
         _historySortMode = "chapter";
         try { localStorage.setItem("JL_HistSort", "chapter"); } catch (_) {}
+        renderHistList(section, analyses);
+        updateSortButtons(section);
+      });
+      section.querySelector("#jl-sort-order").addEventListener("click", function () {
+        _historyDesc = !_historyDesc;
+        try { localStorage.setItem("JL_HistDesc", _historyDesc ? "1" : "0"); } catch (_) {}
         renderHistList(section, analyses);
         updateSortButtons(section);
       });
@@ -4593,7 +4629,7 @@
 
   // 本次批量没有新分析（章节都「已分析过/已完成」）时，回退用本书已存储的分析填充概况，
   // 避免「全书批量分析完成：共 0 章」的空概况误导用户。
-  async function mergeStoredAnalysesForBatch() {
+  async function mergeStoredAnalysesForBatch(sourceUrls) {
     if (!_currentBookId) return false;
     var API = await getAPI();
     var token = await getToken();
@@ -4607,6 +4643,8 @@
       var analyses = payload.data.analyses || [];
       if (!analyses.length) return false;
       analyses.forEach(function (a) {
+        // 只补全「本次批量选中」的章节，避免把整本书的历史摘要都列出来
+        if (sourceUrls && sourceUrls.length && !(a.source_url && sourceUrls.indexOf(a.source_url) !== -1)) return;
         if (!a.result_json) return;
         var result;
         try { result = typeof a.result_json === "string" ? JSON.parse(a.result_json) : a.result_json; } catch (_) { return; }
@@ -4768,7 +4806,8 @@
     _graphMode = "batch";  // 关系图标签默认展示本次批量合并图，避免被「当前章节」覆盖
     // 本次批量没有新分析（章节都「已分析过/已完成」）→ 用已存储的分析补全概况，避免「共 0 章」空概况
     if (_batchMerged.summaries.length === 0) {
-      await mergeStoredAnalysesForBatch();
+      var selectedUrls = items.map(function (i) { return i.source_url; }).filter(function (u) { return u; });
+      await mergeStoredAnalysesForBatch(selectedUrls);
       if (_batchMerged.summaries.length > 0) {
         mergedResult = mergedToResult();
         _batchGraph = mergedResult.graph;
