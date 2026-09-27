@@ -1,11 +1,12 @@
 # 鉴来助手 · 追更不迷路的 AI 阅读助手
 
 [![Chrome Web Store](https://img.shields.io/badge/Chrome-已上线-4285F4?logo=googlechrome)](https://chromewebstore.google.com/detail/鉴来助手-小说-ai-伏笔雷达/ahahdepghanijblcddabfpeipbclobil)
+[![Edge Add-ons](https://img.shields.io/badge/Edge-已上线-0078D7?logo=microsoftedge)](https://microsoftedge.microsoft.com/addons/detail/鉴来助手-小说-ai-伏笔雷达/nmanflfocdfldmijbfngdbgpaoodbkcp)
 [![Greasy Fork](https://img.shields.io/badge/Greasy%20Fork-安装-success?logo=greasyfork)](https://greasyfork.org/zh-CN/scripts/587834)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/平台-25%2B-orange)](https://jianla.xyz)
 
-打开小说页面，AI 自动追踪伏笔、生成人物关系图、无剧透前情提要。25+ 平台通用，免登录试用。
+打开小说页面，AI 自动追踪伏笔、生成人物关系图、无剧透前情提要。25+ 平台通用，支持批量分析，免登录试用。
 
 **官网：[jianla.xyz](https://jianla.xyz)**
 
@@ -15,7 +16,7 @@
 
 鉴来助手是一款面向中文网文读者的 AI 阅读助手，后端基于 **FastAPI + DeepSeek AI + SQLite**，前端为 **Chrome 扩展（Manifest V3）** 与油猴脚本。它对每一章做**无剧透**分析，帮助追更读者快速接上剧情、记住伏笔与人物关系。
 
-除了个人阅读辅助，项目还内置了面向创作者 / 推广者的**引流素材生成**能力：一键把已分析的章节记忆，生成可发布的抖音 / B 站口播脚本、章节速览 / 书评，并自动提取正文金句作为钩子。
+除单章分析外，还内置**批量分析**（目录页勾选章节、全书合并结果）与**全书复盘 / 周报**；并针对起点「错位字体」、番茄「PUA 字体」等反爬手段做了自动解密，正文加密也能正常分析。
 
 ---
 
@@ -23,8 +24,9 @@
 
 | 方式 | 适合 | 链接 |
 |------|------|------|
-| 🌐 Chrome 商店 | Chrome/Edge 用户 | [安装](https://chromewebstore.google.com/detail/鉴来助手-小说-ai-伏笔雷达/ahahdepghanijblcddabfpeipbclobil) |
-| 📦 直接下载 | 国内用户免梯子 | [官网下载](https://jianla.xyz) |
+| 🌐 Chrome 商店 | Chrome 用户 | [安装](https://chromewebstore.google.com/detail/鉴来助手-小说-ai-伏笔雷达/ahahdepghanijblcddabfpeipbclobil) |
+| 🔵 Edge 商店 | 国内免梯子 | [安装](https://microsoftedge.microsoft.com/addons/detail/鉴来助手-小说-ai-伏笔雷达/nmanflfocdfldmijbfngdbgpaoodbkcp) |
+| 📦 直接下载 | 官网直链 | [官网下载](https://jianla.xyz) |
 | 📜 油猴脚本 | 手机/桌面通用 | [标准版](https://jianla.xyz/static/jianlai-helper.user.js) · [Greasy Fork](https://greasyfork.org/zh-CN/scripts/587834) · [手机版](https://jianla.xyz/static/jianlai-helper-alook.user.js) |
 
 安装后打开任意小说章节 → 点右下角按钮 → AI 自动分析。
@@ -35,25 +37,31 @@
 
 | 功能 | 说明 |
 |------|------|
-| 📝 智能摘要 | 每章提炼前情提要，简洁/标准/详细三种粒度，摘要秒出 |
-| 🕵️ 伏笔雷达 | AI 标记线索+可信度评分，跨章追踪（开放中/推进中/已回收） |
+| 📝 智能摘要 | 每章提炼前情提要，快速概况 / 标准概况 / 详细前情提要三种粒度，摘要先出（约 5 秒） |
+| 🕵️ 伏笔雷达 | AI 标记线索 + 可信度评分，跨章追踪状态（开放中 / 推进中 / 已回收） |
 | 👥 人物关系图 | 自动生成关系网络，核心角色高亮，几百章也不脸盲 |
 | 💬 无剧透问答 | 基于已读记忆回答，绝不偷看后面章节 |
-| 🔥 引流素材 | 一键生成口播脚本 / 书评速览 + 正文金句，推广发布直接可用 |
+| 📚 批量分析 | 目录页勾选章节一次批量分析，全书合并结果 + 各章摘要卡片 |
+| 📊 全书复盘 / 周报 | 跨章复盘近期剧情 + 每周阅读报告 |
+| 🔐 反爬解密 | 起点「错位字体」、番茄「PUA 字体」自动还原，加密正文也能分析 |
+| 🔑 激活码兑换 | 额度不足时用激活码一键补充（管理后台批量生成） |
 | 🆓 免登录试用 | 不注册也能用 3 次，注册送 10 次 · 每日签到 +8 次 |
-| ⚡ 渐进式分析 | 摘要先出（约 5 秒），人物和伏笔随后加载 |
 
-支持平台：起点 · 纵横 · 番茄 · 17K · 晋江 · 七猫 · 69书吧 · 笔趣阁等 **25+ 小说网站**。
+支持平台：起点 · 纵横 · 番茄 · 七猫 · QQ阅读 · 笔趣阁（含 biquga / biqutu 等镜像）等 **25+ 小说网站**。
 
 ---
 
 ## 技术栈
 
-**后端：** Python · FastAPI · DeepSeek API · SQLite · Nginx
+**后端：** Python 3.10 · FastAPI · DeepSeek API · SQLite · bcrypt · PyJWT
 
-**前端：** Vanilla JS (Chrome Extension MV3) · vis-network · 油猴脚本三版本
+**前端：** Vanilla JS（Chrome 扩展 MV3 + 油猴脚本三版本）· vis-network
 
-**部署：** 阿里云 · Ubuntu 22.04 · Let's Encrypt SSL
+**反爬解密：** fontTools · Pillow · numpy · brotli（起点错位字体 / 番茄 PUA 字体还原）
+
+**测试：** pytest（后端）· vitest（前端 batch_parser）
+
+**部署：** Nginx · Let's Encrypt SSL · systemd
 
 ---
 
@@ -61,19 +69,24 @@
 
 ```
 novel-copilot-backend/
-├── main.py              # FastAPI 后端入口（路由 + SQLite 建表 + 额度/邮件/管理）
-├── services/            # AI 分析、引流生成、支付、邮件等业务逻辑
-├── models/              # Pydantic 数据模型
-├── JianLai_Helper/      # Chrome 扩展（Manifest V3）
-├── userscript/          # 油猴脚本（标准版 / 手机版 / Greasy Fork 版）
-├── tests/               # 测试
-├── scripts/             # 部署脚本
-├── static/              # 官网静态资源
-├── index.html           # 官网首页
-├── privacy.html         # 隐私政策
-├── support.html         # 支持 / 常见问题
-├── requirements.txt     # 后端依赖
-└── .env.example         # 环境变量模板
+├── main.py                 # FastAPI 后端入口（路由 + SQLite 建表 + 额度/邮件/管理后台/激活码）
+├── services/
+│   ├── ai_service.py       # DeepSeek 调用：单章/批量分析、问答、复盘、全书报告、伏笔回收
+│   ├── auth_service.py     # 密码哈希（bcrypt）
+│   └── qidian_decrypt.py   # 起点「错位字体」反爬解密（字形匹配还原）
+├── JianLai_Helper/         # Chrome 扩展（MV3：content.js 核心逻辑 + batch_parser.js 批量解析）
+├── userscript/             # 油猴脚本（标准版 / Greasy Fork 版 / 手机版）
+├── tests/                  # pytest（后端）+ vitest（前端 batch_parser）
+├── docs/                   # 商店上架清单 / 运营文案
+├── scripts/                # 部署与启动脚本
+├── static/                 # 官网静态资源
+├── index.html              # 官网首页
+├── privacy.html            # 隐私政策
+├── support.html            # 支持 / 常见问题
+├── requirements.txt        # 后端依赖
+├── setup.sh                # 一键初始化脚本
+├── CONTRIBUTING.md         # 贡献指南
+└── .env.example            # 环境变量模板
 ```
 
 ---
@@ -99,6 +112,8 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 
 首次启动会自动创建 `users.db`（SQLite）及所有数据表。
 
+> 起点「错位字体」解密依赖字体字形匹配，默认使用系统 Noto CJK 字体作基准。如部署机器无该字体，请安装 `fonts-noto-cjk`（Debian/Ubuntu），或通过可选环境变量 `QIDIAN_STD_FONT` 指向任意标准黑体字体文件。
+
 ### 环境变量说明
 
 | 变量 | 必填 | 说明 |
@@ -106,9 +121,11 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 | `DEEPSEEK_API_KEY` | ✅ | DeepSeek 开放平台 API Key |
 | `DEEPSEEK_API_URL` / `DEEPSEEK_MODEL` | — | 接口地址与模型，默认已填好 |
 | `SECRET_KEY` | ✅ | JWT 密钥，用 `python -c "import secrets; print(secrets.token_hex(32))"` 生成 |
+| `ACCESS_TOKEN_TTL_SECONDS` / `REFRESH_TOKEN_TTL_SECONDS` | — | 访问令牌 / 刷新令牌有效期（默认 1 天 / 30 天） |
 | `ADMIN_KEY` | ✅ | 访问 `/admin` 后台与 `/api/admin/*` 的管理密钥 |
 | `SMTP_HOST/PORT/USER/PASS` | — | QQ 邮箱 SMTP，用于发送验证码（可选） |
 | `MOCK_PAYMENTS_ENABLED` | — | 开发模式：`true` = 购买直接到账 + 验证码打印到控制台 |
+| `QIDIAN_STD_FONT` | — | 起点解密的标准字体文件路径（可选，默认用系统 Noto CJK） |
 
 ### 2. 前端（Chrome 扩展）
 
@@ -135,7 +152,7 @@ QQ 邮箱需开启 SMTP 并获取「授权码」填入 `SMTP_PASS`（不是登�
 扩展设置页有「后端地址」输入框（默认 `https://jianla.xyz:8000`），改成你的域名即可；也可直接改 `popup.js` / `content.js` 里 `getAPI()` 的默认值。
 
 **Q：额度 / 积分怎么算？**
-免登录可试用 3 次，注册送 10 次，每日签到 +8 次。单章分析、批量分析、全书复盘（20 积分）、引流素材（10 积分）消耗各不相同。
+免登录可试用 3 次，注册送 10 次，每日签到 +8 次。单章分析、批量分析、全书复盘（20 积分）消耗各不相同；额度不足可用「激活码」兑换补充（后台 `/api/admin/redeem/generate` 批量生成，用户在前端「激活码兑换」入口使用）。
 
 **Q：数据库文件在哪？**
 `users.db`（SQLite）在项目根目录，首次启动自动创建；`*.db` 已加入 `.gitignore`，不会被提交。
