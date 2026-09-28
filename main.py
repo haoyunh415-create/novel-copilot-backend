@@ -1591,10 +1591,10 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
         # 轻量 book_id 查找（只读，不创建新书）
         cached_book_id = None
         with get_db() as conn:
-            if req.book_title and req.book_title.strip():
+            if req.book_title and _clean_book_title(req.book_title):
                 book = conn.execute(
                     "SELECT id FROM books WHERE username=? AND title=?",
-                    (user, req.book_title.strip()),
+                    (user, _clean_book_title(req.book_title)),
                 ).fetchone()
                 if book: cached_book_id = book["id"]
             if not cached_book_id and req.source_url:
@@ -1608,37 +1608,9 @@ async def analyze_stream(req: AnalyzeRequest, user=Depends(get_user)):
             yield f"data: {json.dumps({'type': 'done', 'data': {'result': cached, 'cached': True, 'book_id': cached_book_id}}, ensure_ascii=False)}\n\n"
         return StreamingResponse(cached_stream(), media_type="text/event-stream")
 
-    # 书籍匹配
-    book_id = None
+    # 书籍匹配（统一 book_id 归属逻辑，与批量分析一致，避免单章/批量拆书）
+    book_id = _resolve_book_id(user, req.book_title, req.author, req.source_url, req.chapter_title)
     with get_db() as conn:
-        if req.book_title and req.book_title.strip():
-            book = conn.execute(
-                "SELECT id FROM books WHERE username=? AND title=?",
-                (user, req.book_title.strip()),
-            ).fetchone()
-            if book:
-                book_id = book["id"]
-            else:
-                cur = conn.execute(
-                    "INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (user, req.book_title.strip(), req.author or "", req.source_url or "", int(time.time())),
-                )
-                book_id = cur.lastrowid
-        if not book_id and req.source_url:
-            url_prefix = _book_url_prefix(req.source_url)
-            book = conn.execute(
-                "SELECT id FROM books WHERE username=? AND source_url_pattern=?",
-                (user, url_prefix),
-            ).fetchone()
-            if book:
-                book_id = book["id"]
-            else:
-                cur = conn.execute(
-                    "INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (user, req.chapter_title or url_prefix, req.author or "", url_prefix, int(time.time())),
-                )
-                book_id = cur.lastrowid
-
         # 缓存检查
         cached = conn.execute(
             """SELECT result_json FROM analyses
@@ -1841,22 +1813,9 @@ async def analyze_progressive(req: AnalyzeRequest, user=Depends(get_user)):
     if _looks_garbled(req.text):
         return fail("本章正文疑似乱码（如番茄小说字体加密），暂无法自动分析，请手动复制正文后重试")
     spoiler_int = 1 if req.spoiler_free else 0
-    book_id = None
+    # 统一 book_id 归属逻辑：与批量分析共用 _resolve_book_id，避免单章/批量拆成多个 book
+    book_id = _resolve_book_id(user, req.book_title, req.author, req.source_url, req.chapter_title)
     with get_db() as conn:
-        if req.book_title and req.book_title.strip():
-            book = conn.execute("SELECT id FROM books WHERE username=? AND title=?", (user, req.book_title.strip())).fetchone()
-            if book: book_id = book["id"]
-            else:
-                cur = conn.execute("INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?,?,?,?,?)", (user, req.book_title.strip(), req.author or "", req.source_url or "", int(time.time())))
-                book_id = cur.lastrowid
-        if not book_id and req.source_url:
-            url_prefix = _book_url_prefix(req.source_url)
-            book = conn.execute("SELECT id FROM books WHERE username=? AND source_url_pattern=?", (user, url_prefix)).fetchone()
-            if book: book_id = book["id"]
-            else:
-                cur = conn.execute("INSERT INTO books (username, title, author, source_url_pattern, created_at) VALUES (?,?,?,?,?)", (user, req.chapter_title or url_prefix, req.author or "", url_prefix, int(time.time())))
-                book_id = cur.lastrowid
-
         cached = _get_cached_analysis(conn, content_hash, req.detail_level, spoiler_int)
         if not cached:
             old = conn.execute("SELECT result_json FROM analyses WHERE username=? AND text_hash=? AND detail_level=? AND spoiler_free=?", (user, content_hash, req.detail_level, spoiler_int)).fetchone()
