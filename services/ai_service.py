@@ -967,11 +967,14 @@ def _call_report_api(book_title: str, content: str, total: int,
     payload, _finish = _call_ai([
         {"role": "system", "content": "你是一个专业的书评人和阅读复盘助手。"},
         {"role": "user", "content": prompt},
-    ], temperature=0.4, timeout=120)
+    ], temperature=0.4, timeout=120, max_tokens=8192)
     try:
-        return payload["choices"][0]["message"]["content"].strip()
+        report = payload["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError, TypeError) as exc:
         raise RuntimeError(f"报告生成失败：{payload}") from exc
+    if _finish == "length":
+        report += "\n\n---\n\n> ⚠️ 报告因输出长度限制可能不完整，建议对篇幅更长的书分册复盘。"
+    return report
 
 
 def _call_light_report_api(book_title: str, content: str, total: int,
