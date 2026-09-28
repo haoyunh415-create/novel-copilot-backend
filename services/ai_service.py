@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -817,6 +818,7 @@ def suggest_questions(book_title: str, recent_analyses: list[dict]):
 FULL_REPORT_COST = 20  # 消耗积分
 CHUNK_SIZE = 60        # 每批处理的章节数
 LIGHT_CHAPTERS = 10    # 少于此章数用轻量报告，更快
+FULL_REPORT_MAX_WORKERS = 6  # 阶段总结并发数（受 DeepSeek 限流约束，_session 池上限 10）
 
 
 def generate_full_report(book_title: str, memories: list[dict]):
@@ -840,15 +842,21 @@ def generate_full_report(book_title: str, memories: list[dict]):
 
     # 多阶段：分批 → 阶段总结 → 最终报告
     chunks = [memories[i:i + CHUNK_SIZE] for i in range(0, len(memories), CHUNK_SIZE)]
-    phase_summaries = []
 
-    for i, chunk in enumerate(chunks):
+    def _summarize(indexed: tuple) -> str:
+        i, chunk = indexed
         chunk_start = i * CHUNK_SIZE + 1
         chunk_end = min((i + 1) * CHUNK_SIZE, len(memories))
         chunk_text = _build_chapters_text(chunk)
-        phase_summaries.append(
-            _generate_chunk_summary(book_title, chunk_text, chunk_start, chunk_end, len(chunk))
-        )
+        return _generate_chunk_summary(book_title, chunk_text, chunk_start, chunk_end, len(chunk))
+
+    if len(chunks) <= 1:
+        phase_summaries = [_summarize((0, chunks[0]))]
+    else:
+        # 并发生成各阶段总结（executor.map 保序），15 批从 ~10 分钟压到 ~1-2 分钟
+        workers = min(FULL_REPORT_MAX_WORKERS, len(chunks))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            phase_summaries = list(executor.map(_summarize, enumerate(chunks)))
 
     combined = "\n\n---\n\n".join(
         f"## 阶段 {i + 1}（第{i * CHUNK_SIZE + 1}-{min((i + 1) * CHUNK_SIZE, len(memories))}章）\n{s}"

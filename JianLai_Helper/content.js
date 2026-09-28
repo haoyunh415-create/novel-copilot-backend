@@ -770,7 +770,7 @@
 
   // 自动重试 fetch（最多重试 2 次，指数退避；AbortError 不重试）
   async function fetchWithRetry(url, options, retries, timeoutMs) {
-    retries = retries || 2;
+    retries = (retries == null) ? 2 : retries;
     options = options || {};
     var lastError;
     var callerSignal = options.signal;
@@ -2854,7 +2854,7 @@
         },
         body: JSON.stringify({ book_id: _currentBookId }),
         signal: _reportAbortController.signal
-      });
+      }, 0);
 
       clearInterval(stageTimer);
 
