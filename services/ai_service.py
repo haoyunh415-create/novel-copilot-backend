@@ -921,10 +921,63 @@ def _do_single_pass_report(book_title: str, chapters_text: str, total: int) -> s
 
 
 def _do_final_report(book_title: str, combined_summaries: str, total: int) -> str:
-    """最终阶段：从阶段总结汇总生成完整复盘报告。"""
-    return _call_report_api(book_title, combined_summaries, total,
-                            input_label="阶段性总结",
-                            extra_rule="4. 各阶段的细节要有机整合，不要简单罗列阶段编号\n")
+    """最终阶段：从阶段总结分段生成完整复盘报告（每段 ≤8192 token，避免长书超输出上限截断）。"""
+    sections = [
+        _call_report_section_api(book_title, combined_summaries, total, spec)
+        for spec in REPORT_SECTIONS
+    ]
+    return "\n\n".join(sections)
+
+
+# 报告结构分段（多阶段最终报告每段独立生成，绕过 deepseek-chat 单次 8192 输出上限）
+REPORT_SECTIONS = [
+    """## 📖 主线梳理
+概述全书主线剧情走向，分阶段描述情节推进，标注关键转折点。
+
+## 🕐 关键剧情节点
+按时间线列出 5-10 个最重要的剧情节点，每个节点说明事件及其对后续剧情的影响。""",
+    """## 👥 人物谱系
+列出重要人物，每人包括：身份定位、性格特点、关键经历、与其他角色的关系。
+
+## 🔍 伏笔追踪
+列出重要的伏笔线索，注明埋设章节，以及是否已回收或仍在铺垫中。""",
+    """## 📚 世界观设定
+整理重要的世界观元素：势力分布、修炼/社会体系、特殊规则、关键地名和物品。
+
+## 💡 阅读建议
+基于已读内容，给读者的后续阅读建议，不剧透。""",
+]
+
+
+def _call_report_section_api(book_title: str, content: str, total: int, section_spec: str) -> str:
+    """生成报告的指定部分（多阶段最终报告按段调用）。"""
+    prompt = f"""你是《{book_title}》的深度阅读复盘助手。请基于以下阶段性总结，生成全书阅读复盘报告的指定部分。
+
+覆盖章节数：{total} 章
+
+规则：
+1. 只基于给定内容，不编造，不引用后文
+2. 语言生动但有深度，像一个资深书评人
+3. 每个重要事件尽量注明相关章节
+
+阶段性总结：
+{content}
+
+请只输出以下部分（保持 Markdown 标题格式）：
+
+{section_spec}"""
+
+    payload, _finish = _call_ai([
+        {"role": "system", "content": "你是一个专业的书评人和阅读复盘助手。"},
+        {"role": "user", "content": prompt},
+    ], temperature=0.4, timeout=120, max_tokens=8192)
+    try:
+        section = payload["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"报告生成失败：{payload}") from exc
+    if _finish == "length":
+        section += "\n\n> ⚠️ 本部分因输出长度限制可能不完整。"
+    return section
 
 
 def _call_report_api(book_title: str, content: str, total: int,
