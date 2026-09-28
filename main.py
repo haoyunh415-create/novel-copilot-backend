@@ -651,19 +651,25 @@ def _book_url_prefix(source_url):
     - 起点/纵横：/chapter/{book}/{...} → 保留到 book 一层
     - 番茄：/reader/{book}、/page/{book}、/read/{book}、/book/{book} → 保留到 book 一层
     - 七猫：/reader/index/{book} → 保留到 book；/shuku/{book}-{chapter}/ → /shuku/{book}/
+    - QQ 阅读：/book-read/{book}/{chapter}、/book-detail/{book} → 保留到 book 一层
     - 笔趣阁镜像（biquge/biquga 等）：首段即书目录（如 /9_9181/123456.html → /9_9181/）
+    - 域名归一化：www./m. 子域统一去掉，避免同一本书因移动/桌面域名被拆成多本
     - 兜底：域名 + 首段（不再退化为纯域名，避免同站所有书合并成一本书）
     """
     if not source_url:
         return ""
     parts = urlsplit(source_url)
     segs = [s for s in parts.path.split("/") if s]
-    origin = urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+    netloc = re.sub(r"^(www|m)\.", "", parts.netloc)
+    origin = urlunsplit((parts.scheme, netloc, "", "", ""))
     if not segs:
         return origin + "/"
     p0 = segs[0].lower()
     if p0 == "chapter" and len(segs) >= 2:
         return f"{origin}/chapter/{segs[1]}/"
+    # QQ 阅读 /book-read/{book}/{chapter}、/book-detail/{book} → 保留到 book 一层
+    if p0 in ("book-read", "book-detail") and len(segs) >= 2:
+        return f"{origin}/{p0}/{segs[1]}/"
     # 七猫 reader/index/{book}（book 在 index 之后）优先于通用 reader 判断
     if p0 == "reader" and len(segs) >= 3 and segs[1].lower() == "index":
         return f"{origin}/reader/index/{segs[2]}/"
