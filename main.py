@@ -104,6 +104,7 @@ EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASS)
 _rate_limits = {}
 RATE_LIMITS = {
     "analyze": {"per_user": 20, "window": 60},       # 每用户每分钟最多20次分析
+    "batch_analyze": {"per_user": 60, "window": 60},  # 批量分析每用户每分钟最多60次提交（一次批量=多章，每章额度另有限制）
     "ask": {"per_user": 10, "window": 60},            # 每用户每分钟最多10次问答
     "refresh": {"per_ip": 10, "window": 60},            # 每IP每分钟最多10次刷新
     "send_code": {"per_ip": 3, "window": 300},         # 每IP每5分钟最多3次发验证码
@@ -1451,8 +1452,8 @@ def batch_submit(job_id: int, req: BatchSubmitRequest, user=Depends(get_user)):
         if job["status"] == "done":
             return fail("任务已完成")
 
-    # 批量分析不再受单章节 2 秒节流约束（保留 20/分钟 限流），允许前端并发提交提速
-    allowed, retry = _check_rate_limit("analyze", user=user)
+    # 批量分析用独立限流（60/分钟），不受单章 analyze 20/分钟约束；每章扣额度已是最强约束
+    allowed, retry = _check_rate_limit("batch_analyze", user=user)
     if not allowed:
         return fail(f"请求太频繁，请 {retry} 秒后再试")
 

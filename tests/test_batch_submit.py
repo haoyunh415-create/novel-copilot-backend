@@ -1,3 +1,4 @@
+import time
 from datetime import date
 
 import main as m
@@ -60,3 +61,25 @@ def test_submit_pauses_on_insufficient_credits(monkeypatch, client, db):
     with m.get_db() as conn:
         j = conn.execute("SELECT status FROM batch_jobs WHERE id=?", (job["job_id"],)).fetchone()
         assert j["status"] == "paused"
+
+
+def test_batch_submit_uses_separate_rate_limit(monkeypatch, client, db):
+    """批量提交不受「单章 analyze 每分钟 20 次」限流约束，避免 >20 章批量被卡。"""
+    monkeypatch.setattr(m, "analyze_text", _stub_analyze_text)
+    job = _make_job(client)
+    with m.get_db() as conn:
+        item = conn.execute(
+            "SELECT id FROM batch_items WHERE job_id=? AND status='pending' ORDER BY id LIMIT 1",
+            (job["job_id"],),
+        ).fetchone()
+
+    # 把「analyze」限流塞满（模拟单章分析已打满 20 次/分钟），批量提交仍应放行
+    now = time.time()
+    m._rate_limits["analyze:testuser"] = [now] * 20
+
+    resp = client.post(f"/api/analyze/batch/{job['job_id']}/submit", json={
+        "item_id": item["id"],
+        "text": "第二章正文内容，足够长的一段测试文本。" * 30,
+    })
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
