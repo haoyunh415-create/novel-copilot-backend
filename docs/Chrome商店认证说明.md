@@ -7,7 +7,7 @@
 
 - 当前 manifest 权限：`storage` / `activeTab` / `scripting` / `host_permissions`
 - `host_permissions` = **28 个小说阅读域名** + `https://jianla.xyz:8000/*`（自有后端）
-- 首次编写 v2.1.0，沿用至今（v2.3.29 权限结构未变，仅域名数量随平台扩充）
+- 首次编写 v2.1.0，沿用至今（v2.3.30 权限结构未变，仅域名数量随平台扩充）
 
 ---
 
@@ -31,6 +31,33 @@ Permission justifications:
 Remote code: None. All code is bundled in this package; the extension only calls our own backend and never loads or executes remote code.
 
 Data use: Only the chapter text a user explicitly chooses to analyze is sent to our backend to generate summaries. Original text is not stored (results are cached by content hash), data is never sold or used for advertising, and email is used solely for verification-code login.
+```
+
+---
+
+## 📜 中文版认证说明（可选，商店界面为中文时用）
+
+```text
+鉴来助手（小说 AI 伏笔雷达）认证说明
+
+一、产品功能
+本扩展是面向中文网络小说读者的 AI 阅读辅助工具。用户在支持的阅读网站打开章节后点击「分析当前章节」，扩展读取当前章节正文，调用自有后端（jianla.xyz）的大模型接口，生成无剧透前情提要、伏笔提示与人物关系图，并支持批量分析和全书复盘，帮助读者快速回顾前文、追踪伏笔。
+
+二、权限用途说明
+1. storage：本地保存登录态与用户偏好设置（排序方式、显示模式、批量章节数等），不用于上传任何数据。
+2. activeTab：仅在用户主动点击扩展按钮时获取当前活动标签页，用于定位「当前正在阅读的章节页」。
+3. scripting：仅在用户点击「分析」后向当前页面注入内容脚本，读取章节正文与标题；不在后台自动注入，不修改页面内容。
+4. host_permissions（各小说网站域名）：产品定位为多平台阅读辅助（支持 28 个小说网站），核心功能依赖读取这些站点的章节正文，因此需在用户访问相应站点时读取页面文本。所有读取均由用户主动点击「分析」触发，绝不静默采集。
+5. https://jianla.xyz:8000/*：自有后端 API，用于登录验证、AI 分析与额度记录。
+
+三、数据收集与隐私
+- 仅收集用户主动分析时的章节文本，发送至自有服务器用于生成分析结果；
+- 登录采用邮箱验证码方式，不收集任何密码；
+- 所收集数据仅用于提供分析服务，不出售、不共享给任何第三方；
+- 除提供服务所需外，不收集任何个人身份信息。
+
+四、远程代码声明
+本扩展不包含任何远程代码执行，所有脚本均打包在扩展包内，不存在通过远程加载的可执行代码。
 ```
 
 ---
