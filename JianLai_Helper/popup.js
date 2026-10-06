@@ -163,8 +163,8 @@ async function renderState() {
   var stored = await getToken();
   var token = stored.token;
 
-  // 如果 access_token 过期，尝试静默刷新
-  if (!token && stored.refreshToken) {
+  // access_token 过期或缺失时，若有 refreshToken 先静默刷新（否则 24h 一过打开弹窗就被登出）
+  if ((!token || isTokenExpired(token)) && stored.refreshToken) {
     showMessage("正在恢复登录...");
     token = await refreshAccessToken();
     if (token) {
